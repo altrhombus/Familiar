@@ -36,9 +36,10 @@ longer maintained.
 - **Configuration Manager without the console.** The AdminService (REST) is the primary transport, with
   direct WMI to the SMS Provider as a fallback for sites without AdminService configured. Neither needs
   the ConfigMgr console or PowerShell module on the build machine.
-- **Updates from a local folder first.** Drop MSUs into a folder (DISM resolves checkpoint cumulative
-  updates on 24H2 and later when they sit together). Microsoft Update Catalog and ConfigMgr sources come
-  later.
+- **Updates downloaded for you.** The latest cumulative update comes from the release data; Familiar finds it
+  in the Microsoft Update Catalog, downloads every file it lists (including checkpoint updates), verifies each
+  against the catalog's SHA-1, and installs them oldest first after languages. The catalog has no API, so its
+  page parsing is isolated in `UpdateCatalogClient`. A plain folder of MSUs works too.
 - **The app runs unpackaged** so it can elevate, and bundles the Windows App SDK so no runtime install
   is needed. It starts unelevated and offers to restart as administrator.
 
@@ -50,8 +51,8 @@ longer maintained.
 4. ~~Updates: LCU, checkpoint CUs and .NET from a folder~~; still to do: Safe OS and Setup Dynamic Updates for WinRE and media
 5. Languages for install media: boot.wim, `lang.ini`; re-provisioning inbox apps from the Inbox Apps ISO
 6. Drivers, .NET 3.5, provisioned app removal, registry files, custom scripts
-7. Configuration Manager: create/update OS image packages, distribute content, update catalog downloads
-8. Update downloads from the Microsoft Update Catalog
+7. Configuration Manager: create/update OS image packages, distribute content, ConfigMgr as an update source
+8. ~~Update downloads from the Microsoft Update Catalog~~
 9. ISO creation (`oscdimg` from the ADK)
 10. Autopilot JSON drop-in
 
@@ -72,6 +73,8 @@ familiar languages F:\                  # what a Languages and Optional Features
 familiar languages F:\ --lang de-DE ja-JP
 familiar recipe new my-build.json       # starter recipe to edit
 familiar recipe check my-build.json     # validate recipe and media without changing anything
+familiar updates list --release 25H2    # latest cumulative and .NET updates in the catalog
+familiar updates download --release 25H2 --folder C:\Updates\25H2
 familiar info E:\sources\install.wim    # indexes, release, patch level, support (elevated)
 familiar build my-build.json            # run the build (elevated)
 ```
