@@ -68,9 +68,21 @@ public sealed class BuildRunner(ReleaseCatalog? catalog = null, UpdateDownloader
         Directory.CreateDirectory(work);
         log($"Working folder: {work}");
 
+        var started = DateTime.Now;
         try
         {
             await BuildAsync(recipe, media, mediaBuild, source, work, warnings, progress, log, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException && Diagnostics.AsrBlocks.Find(started, work) is { Count: > 0 } blocks)
+        {
+            // DISM reports these as generic failures (often 0x800f0922); name the real cause.
+            var details = string.Join(Environment.NewLine, blocks.Take(5).Select(b =>
+                $"  {b.Time:HH:mm:ss} {b.RuleName}: {Path.GetFileName(b.Path)} (by {Path.GetFileName(b.ProcessName)})"));
+            throw new BuildException(
+                $"{Images.DismErrors.Describe(ex) ?? ex.Message}{Environment.NewLine}"
+                + $"Microsoft Defender attack surface reduction blocked {blocks.Count} file operation(s) during the build, which is the likely cause:{Environment.NewLine}"
+                + details + Environment.NewLine
+                + "Ask whoever manages Defender policy about an exclusion for the working directory, or build on a machine where these rules are in audit mode.");
         }
         finally
         {

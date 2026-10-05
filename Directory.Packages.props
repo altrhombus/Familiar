@@ -5,6 +5,7 @@
   <ItemGroup>
     <!-- Servicing -->
     <PackageVersion Include="Microsoft.Dism" Version="6.1.0" />
+    <PackageVersion Include="System.Diagnostics.EventLog" Version="10.0.12" />
 
     <!-- CLI -->
     <PackageVersion Include="System.CommandLine" Version="2.0.12" />
