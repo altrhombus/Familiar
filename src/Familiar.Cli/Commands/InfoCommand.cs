@@ -38,7 +38,7 @@ internal static class InfoCommand
             var catalog = await CatalogOptions.LoadAsync(parseResult, cancellationToken);
             var today = DateOnly.FromDateTime(DateTime.Today);
 
-            using var dism = new DismSession();
+            using var dism = new DismHost();
             foreach (var index in dism.GetIndexes(file.FullName))
             {
                 var release = catalog.Resolve(index.Version.Build, index.InstallationType);

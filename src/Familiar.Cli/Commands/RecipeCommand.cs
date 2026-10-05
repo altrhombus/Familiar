@@ -1,0 +1,109 @@
+using System.CommandLine;
+using System.Text.Json;
+using Familiar.Core.Languages;
+using Familiar.Core.Recipes;
+using Familiar.Core.Servicing;
+
+namespace Familiar.Cli.Commands;
+
+internal static class RecipeCommand
+{
+    public static Command Create()
+    {
+        var command = new Command("recipe", "Create and check build recipes.")
+        {
+            CreateNew(),
+            CreateCheck(),
+        };
+
+        return command;
+    }
+
+    private static Command CreateNew()
+    {
+        var path = new Argument<FileInfo>("path") { Description = "Where to write the recipe." };
+        var command = new Command("new", "Write a starter recipe to edit.") { path };
+
+        command.SetAction(async (parseResult, cancellationToken) =>
+        {
+            var file = parseResult.GetValue(path)!;
+            if (file.Exists)
+            {
+                Console.Error.WriteLine($"{file.FullName} already exists.");
+                return ExitCodes.Invalid;
+            }
+
+            await File.WriteAllTextAsync(file.FullName, RecipeSerializer.Serialize(RecipeSerializer.Template()), cancellationToken);
+            Console.WriteLine($"Wrote {file.FullName}");
+            return ExitCodes.Success;
+        });
+
+        return command;
+    }
+
+    private static Command CreateCheck()
+    {
+        var path = new Argument<FileInfo>("path") { Description = "Recipe to check." };
+        var command = new Command("check", "Validate a recipe and its media without changing anything.") { path };
+
+        command.SetAction(async (parseResult, cancellationToken) =>
+        {
+            var recipe = await LoadAsync(parseResult.GetValue(path)!, cancellationToken);
+            if (recipe is null)
+            {
+                return ExitCodes.Invalid;
+            }
+
+            var errors = RecipeValidator.Validate(recipe).ToList();
+            Console.WriteLine($"Recipe:  {recipe.Name ?? "(unnamed)"}");
+            Console.WriteLine($"Source:  {recipe.Source.Path} index {recipe.Source.Index}");
+            Console.WriteLine($"Output:  {recipe.Output.Path}");
+
+            if (recipe.Languages is { } languages && Directory.Exists(languages.MediaPath))
+            {
+                var media = LanguageMedia.Scan(languages.MediaPath);
+                var sample = media.LanguagePacks.Values.FirstOrDefault(p => !p.IsInterfacePack);
+                var identity = sample is null ? null : await CabManifest.ReadIdentityAsync(sample.Path, cancellationToken);
+                Console.WriteLine($"Media:   {media.FeaturesPath}, build {identity?.Version?.ToString() ?? "unknown"}");
+
+                var plan = LanguagePlanner.PlanImage(new LanguageRequest { Languages = languages.Languages, IncludeFonts = languages.IncludeFonts }, media);
+                Console.WriteLine($"Plan:    {plan.Actions.Count} language actions (before checking what the image already has)");
+                foreach (var warning in plan.Warnings)
+                {
+                    Console.WriteLine($"warning: {warning}");
+                }
+
+                errors.AddRange(plan.Errors);
+            }
+
+            foreach (var error in errors)
+            {
+                Console.WriteLine($"error:   {error}");
+            }
+
+            Console.WriteLine(errors.Count == 0 ? "OK" : $"{errors.Count} problem(s)");
+            return errors.Count == 0 ? ExitCodes.Success : ExitCodes.Invalid;
+        });
+
+        return command;
+    }
+
+    internal static async Task<BuildRecipe?> LoadAsync(FileInfo file, CancellationToken cancellationToken)
+    {
+        if (!file.Exists)
+        {
+            Console.Error.WriteLine($"Recipe not found: {file.FullName}");
+            return null;
+        }
+
+        try
+        {
+            return await RecipeSerializer.LoadAsync(file.FullName, cancellationToken);
+        }
+        catch (JsonException ex)
+        {
+            Console.Error.WriteLine($"{file.Name}: {ex.Message}");
+            return null;
+        }
+    }
+}

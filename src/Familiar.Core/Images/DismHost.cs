@@ -6,18 +6,26 @@ namespace Familiar.Core.Images;
 /// Owns the DISM API lifetime for the process. Create one per host (CLI run, app session) and
 /// dispose it on exit; DISM does not reliably support re-initializing after shutdown.
 /// </summary>
-public sealed class DismSession : IDisposable
+public sealed class DismHost : IDisposable
 {
     private bool _disposed;
 
-    public DismSession()
+    /// <param name="logFilePath">Optional DISM log, with warnings and errors.</param>
+    public DismHost(string? logFilePath = null)
     {
         if (!ProcessElevation.IsElevated)
         {
             throw new UnauthorizedAccessException("The DISM API requires administrator rights.");
         }
 
-        DismApi.Initialize(DismLogLevel.LogErrors);
+        if (logFilePath is null)
+        {
+            DismApi.Initialize(DismLogLevel.LogErrors);
+        }
+        else
+        {
+            DismApi.Initialize(DismLogLevel.LogErrorsWarnings, logFilePath);
+        }
     }
 
     /// <summary>Lists the indexes in a WIM or ESD file.</summary>

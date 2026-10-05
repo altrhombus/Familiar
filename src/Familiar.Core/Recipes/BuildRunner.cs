@@ -1,0 +1,241 @@
+using System.Globalization;
+using Familiar.Core.Languages;
+using Familiar.Core.Servicing;
+using Microsoft.Dism;
+
+namespace Familiar.Core.Recipes;
+
+/// <summary>A build stopped for a reason the user can act on (as opposed to a bug).</summary>
+public sealed class BuildException(string message) : Exception(message);
+
+public sealed record BuildResult(string OutputPath, IReadOnlyList<string> Warnings);
+
+/// <summary>
+/// Runs a <see cref="BuildRecipe"/>. The source image is never modified: the chosen index is exported to a
+/// working copy, serviced there, and exported again to the output path. Requires an initialized DISM API.
+/// </summary>
+public sealed class BuildRunner(DismCommand? dismCommand = null)
+{
+    private readonly DismCommand _dism = dismCommand ?? new DismCommand();
+
+    public async Task<BuildResult> RunAsync(
+        BuildRecipe recipe,
+        IProgress<ServicingProgress>? progress = null,
+        Action<string>? log = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(recipe);
+        log ??= _ => { };
+        var warnings = new List<string>();
+
+        var problems = RecipeValidator.Validate(recipe);
+        if (problems.Count > 0)
+        {
+            throw new BuildException(string.Join(Environment.NewLine, problems));
+        }
+
+        if (File.Exists(recipe.Output.Path))
+        {
+            throw new BuildException($"Output {recipe.Output.Path} already exists. Move it or choose another output.path.");
+        }
+
+        var media = recipe.Languages is null ? null : LanguageMedia.Scan(recipe.Languages.MediaPath);
+        var mediaBuild = media is null ? null : await ReadMediaBuildAsync(media, cancellationToken).ConfigureAwait(false);
+
+        var sourceName = DismApi.GetImageInfo(recipe.Source.Path).FirstOrDefault(i => i.ImageIndex == recipe.Source.Index)?.ImageName
+            ?? throw new BuildException($"Index {recipe.Source.Index} does not exist in {recipe.Source.Path}.");
+
+        var work = Path.Combine(recipe.WorkingDirectory, DateTime.Now.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture));
+        Directory.CreateDirectory(work);
+        log($"Working folder: {work}");
+
+        try
+        {
+            await BuildAsync(recipe, media, mediaBuild, sourceName, work, warnings, progress, log, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            // Mounted images are already unmounted (and discarded on failure) by the time we get here.
+            TryDelete(work, log);
+        }
+
+        log($"Done: {recipe.Output.Path}");
+        return new BuildResult(recipe.Output.Path, warnings);
+    }
+
+    private async Task BuildAsync(
+        BuildRecipe recipe,
+        LanguageMedia? media,
+        int? mediaBuild,
+        string sourceName,
+        string work,
+        List<string> warnings,
+        IProgress<ServicingProgress>? progress,
+        Action<string> log,
+        CancellationToken cancellationToken)
+    {
+        var workImage = Path.Combine(work, "install.wim");
+        await Run(_dism.ExportImageAsync(recipe.Source.Path, recipe.Source.Index, workImage, progress: progress, cancellationToken: cancellationToken)).ConfigureAwait(false);
+
+        await using (var image = await MountedImage.MountAsync(workImage, 1, Path.Combine(work, "mount"), progress, cancellationToken).ConfigureAwait(false))
+        {
+            var baseline = image.GetServicingBaselineBuild();
+            var version = OfflineRegistry.ReadVersion(image.MountPath);
+            log($"Image: {sourceName}, build {version.CurrentBuild}.{version.UpdateBuildRevision} ({version.DisplayVersion ?? version.ReleaseId}), servicing baseline {baseline}");
+
+            if (media is not null && recipe.Languages is { } languages)
+            {
+                if (mediaBuild is not null && baseline is not null && mediaBuild != baseline)
+                {
+                    throw new BuildException(
+                        $"The language media is for build {mediaBuild}, but this image is serviced as build {baseline}. Use the Languages and Optional Features media for {baseline}.");
+                }
+
+                // Languages go in before cumulative updates, so the update also refreshes the new language resources.
+                if (languages.UpdateWinRE)
+                {
+                    warnings.AddRange(await LocalizeWinREAsync(image, languages, media, work, recipe.Output.CleanupComponents, progress, log, cancellationToken).ConfigureAwait(false));
+                }
+
+                var request = new LanguageRequest
+                {
+                    Languages = languages.Languages,
+                    Features = languages.Features is { Count: > 0 } features
+                        ? new HashSet<LanguageFeature>(features)
+                        : new HashSet<LanguageFeature>(Enum.GetValues<LanguageFeature>()),
+                    IncludeFonts = languages.IncludeFonts,
+                };
+
+                var plan = LanguagePlanner.PlanImage(request, media, image.GetLanguageState());
+                warnings.AddRange(plan.Warnings);
+                if (!plan.IsValid)
+                {
+                    throw new BuildException(string.Join(Environment.NewLine, plan.Errors));
+                }
+
+                log($"Adding {plan.Actions.Count} language packages and features");
+                foreach (var action in plan.Actions)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    log($"  {action.Description}");
+                    await image.ApplyAsync(action, progress, cancellationToken).ConfigureAwait(false);
+                }
+
+                if (languages.DefaultLanguage is { } defaultLanguage)
+                {
+                    log($"Setting default language to {defaultLanguage}");
+                    await Run(_dism.SetAllInternationalAsync(image.MountPath, defaultLanguage, progress, cancellationToken)).ConfigureAwait(false);
+                }
+            }
+
+            if (recipe.Output.CleanupComponents)
+            {
+                log("Cleaning up components");
+                await Run(_dism.CleanupComponentsAsync(image.MountPath, resetBase: false, progress, cancellationToken)).ConfigureAwait(false);
+            }
+
+            log("Saving image");
+            await image.CommitAsync(progress, cancellationToken).ConfigureAwait(false);
+        }
+
+        // Exporting drops the space left behind by replaced files and stores the final name.
+        Directory.CreateDirectory(Path.GetDirectoryName(recipe.Output.Path)!);
+        await Run(_dism.ExportImageAsync(workImage, 1, recipe.Output.Path, recipe.Output.ImageName ?? sourceName, progress, cancellationToken)).ConfigureAwait(false);
+    }
+
+    private static void TryDelete(string folder, Action<string> log)
+    {
+        try
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            log($"Could not remove working folder {folder}: {ex.Message}");
+        }
+    }
+
+    private async Task<IReadOnlyList<string>> LocalizeWinREAsync(
+        MountedImage image,
+        LanguagesSection languages,
+        LanguageMedia media,
+        string work,
+        bool cleanup,
+        IProgress<ServicingProgress>? progress,
+        Action<string> log,
+        CancellationToken cancellationToken)
+    {
+        var winRE = Path.Combine(image.MountPath, "Windows", "System32", "Recovery", "Winre.wim");
+        if (!File.Exists(winRE))
+        {
+            return ["The image has no WinRE (Windows\\System32\\Recovery\\Winre.wim); recovery was not localized."];
+        }
+
+        var workWinRE = Path.Combine(work, "winre.wim");
+        File.Copy(winRE, workWinRE);
+        File.SetAttributes(workWinRE, FileAttributes.Normal);
+
+        IReadOnlyList<string> warnings;
+        await using (var recovery = await MountedImage.MountAsync(workWinRE, 1, Path.Combine(work, "winre-mount"), progress, cancellationToken).ConfigureAwait(false))
+        {
+            var plan = LanguagePlanner.PlanWinPE(languages.Languages, media, recovery.GetPackages().Select(p => p.ToString()).ToList());
+            warnings = plan.Warnings;
+            if (plan.Actions.Count == 0)
+            {
+                await recovery.DiscardAsync(progress, cancellationToken).ConfigureAwait(false);
+                return warnings;
+            }
+
+            log($"Localizing WinRE ({plan.Actions.Count} packages)");
+            foreach (var action in plan.Actions)
+            {
+                log($"  {action.Description}");
+                await recovery.ApplyAsync(action, progress, cancellationToken).ConfigureAwait(false);
+            }
+
+            if (languages.DefaultLanguage is { } defaultLanguage && media.WinPE.ContainsKey(defaultLanguage))
+            {
+                await Run(_dism.SetAllInternationalAsync(recovery.MountPath, defaultLanguage, progress, cancellationToken)).ConfigureAwait(false);
+            }
+
+            if (cleanup)
+            {
+                await Run(_dism.CleanupComponentsAsync(recovery.MountPath, resetBase: true, progress, cancellationToken)).ConfigureAwait(false);
+            }
+
+            await recovery.CommitAsync(progress, cancellationToken).ConfigureAwait(false);
+        }
+
+        // Re-export to shrink WinRE, then put it back where Windows expects it.
+        var compacted = Path.Combine(work, "winre-final.wim");
+        await Run(_dism.ExportImageAsync(workWinRE, 1, compacted, progress: progress, cancellationToken: cancellationToken)).ConfigureAwait(false);
+
+        var attributes = File.GetAttributes(winRE);
+        File.SetAttributes(winRE, FileAttributes.Normal);
+        File.Copy(compacted, winRE, overwrite: true);
+        File.SetAttributes(winRE, attributes);
+        return warnings;
+    }
+
+    // Any language pack on the media carries the build it was made for.
+    private static async Task<int?> ReadMediaBuildAsync(LanguageMedia media, CancellationToken cancellationToken)
+    {
+        var sample = media.LanguagePacks.Values.FirstOrDefault(p => !p.IsInterfacePack);
+        if (sample is null)
+        {
+            return null;
+        }
+
+        var identity = await CabManifest.ReadIdentityAsync(sample.Path, cancellationToken).ConfigureAwait(false);
+        return identity?.Version?.Build;
+    }
+
+    private static async Task Run(Task<DismCommandResult> command)
+    {
+        var result = await command.ConfigureAwait(false);
+        if (!result.Succeeded)
+        {
+            throw new BuildException($"dism.exe failed with exit code {result.ExitCode}:{Environment.NewLine}{result.Output.Trim()}");
+        }
+    }
+}

@@ -6,6 +6,8 @@ var rootCommand = new RootCommand("Familiar: offline Windows image servicing.")
     InfoCommand.Create(),
     ReleasesCommand.Create(),
     LanguagesCommand.Create(),
+    RecipeCommand.Create(),
+    BuildCommand.Create(),
 };
 
 return await rootCommand.Parse(args).InvokeAsync();

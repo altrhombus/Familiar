@@ -7,8 +7,8 @@ Configuration Manager or packs it into an ISO.
 Familiar is a C# successor to [WIM Witch](https://github.com/thenotoriousdrr/WIM-Witch), which is no
 longer maintained.
 
-> **Status:** early scaffolding. The solution builds and the release catalog works; servicing is not
-> implemented yet.
+> **Status:** early. Release data, language planning and recipe-driven language builds are written;
+> the build path has not yet been run end to end against a real image.
 
 ## Layout
 
@@ -24,8 +24,15 @@ longer maintained.
 - **DISM API, not PowerShell.** Servicing goes through `dismapi.dll` via
   [Microsoft.Dism](https://github.com/jeffkl/ManagedDism), which gives real progress callbacks and
   cancellation.
-- **Release knowledge is data.** `WindowsReleaseCatalog` maps builds to releases and to the language/FOD
-  media they share (for example, Windows 11 25H2 uses the 24H2 media). Adding a release is one line.
+- **Release knowledge is data, not code.** Releases, cumulative updates and lifecycles come from
+  [DataForGeeks](https://github.com/altrhombus/DataForGeeks), cached locally with a bundled snapshot for
+  offline machines. Releases that receive the same KB at the same revision share a servicing branch, so a new
+  enablement release (25H2, 26H2) needs a data refresh, not a Familiar release.
+- **The image is the final authority.** At build time the mounted image's Foundation package gives its true
+  servicing baseline, and the language media's own package version must match it before anything is applied.
+- **Media is inventoried, not listed.** Language packs, Features on Demand, fonts and WinPE components are
+  discovered from the Languages and Optional Features ISO. Font capabilities come from Windows locale script
+  data.
 - **Configuration Manager without the console.** The AdminService (REST) is the primary transport, with
   direct WMI to the SMS Provider as a fallback for sites without AdminService configured. Neither needs
   the ConfigMgr console or PowerShell module on the build machine.
@@ -37,15 +44,16 @@ longer maintained.
 
 ## Roadmap
 
-1. Mount/dismount, index selection, export
-2. Updates: SSU/LCU, checkpoint CUs, .NET, Setup Dynamic Update; boot.wim and WinRE
-3. Languages: language packs, language FODs, WinPE/WinRE language packs, `lang.ini`, default UI language
-4. Drivers, .NET 3.5, provisioned app removal, registry files, custom scripts
-5. Saved configurations (JSON) and the CLI build command
-6. Configuration Manager: create/update OS image packages, distribute content, update catalog downloads
-7. Update downloads from the Microsoft Update Catalog
-8. ISO creation (`oscdimg` from the ADK)
-9. Autopilot JSON drop-in
+1. ~~Mount/dismount, index selection, export~~ (written, needs an end-to-end run)
+2. ~~Languages: language packs, language FODs, WinRE languages, default UI language~~ (written, needs an end-to-end run)
+3. ~~Recipes (JSON) and the CLI build command~~
+4. Updates: LCU, checkpoint CUs, .NET, Setup Dynamic Update; boot.wim and WinRE
+5. Languages for install media: boot.wim, `lang.ini`; re-provisioning inbox apps from the Inbox Apps ISO
+6. Drivers, .NET 3.5, provisioned app removal, registry files, custom scripts
+7. Configuration Manager: create/update OS image packages, distribute content, update catalog downloads
+8. Update downloads from the Microsoft Update Catalog
+9. ISO creation (`oscdimg` from the ADK)
+10. Autopilot JSON drop-in
 
 ## Building
 
@@ -54,8 +62,21 @@ Requires the .NET 10 SDK on Windows. Visual Studio 2026 is optional.
 ```powershell
 dotnet build Familiar.slnx
 dotnet test --solution Familiar.slnx
-dotnet run --project src/Familiar.Cli -- releases
 ```
+
+## Using the CLI
+
+```powershell
+familiar releases                       # releases, servicing baselines, latest CUs, end of support
+familiar languages F:\                  # what a Languages and Optional Features ISO offers
+familiar languages F:\ --lang de-DE ja-JP
+familiar recipe new my-build.json       # starter recipe to edit
+familiar recipe check my-build.json     # validate recipe and media without changing anything
+familiar info E:\sources\install.wim    # indexes, release, patch level, support (elevated)
+familiar build my-build.json            # run the build (elevated)
+```
+
+Release data refreshes from the network every 12 hours; pass `--offline` on air-gapped machines.
 
 Servicing commands require an elevated prompt. ISO creation and WinPE language packs require the
 [Windows ADK and WinPE add-on](https://learn.microsoft.com/windows-hardware/get-started/adk-install).
