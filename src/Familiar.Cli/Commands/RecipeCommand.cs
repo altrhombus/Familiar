@@ -82,6 +82,18 @@ internal static class RecipeCommand
                 errors.AddRange(plan.Errors);
             }
 
+            if (recipe.InboxApps is { } inboxApps && Directory.Exists(inboxApps.MediaPath))
+            {
+                var apps = Familiar.Core.InboxApps.InboxAppMedia.Scan(inboxApps.MediaPath);
+                Console.WriteLine($"Apps:    {apps.PackagesPath}, {apps.Apps.Count} apps and {apps.Frameworks.Count} frameworks (re-provisions those already in the image)");
+            }
+
+            if (recipe.ConfigMgr is { } configMgr)
+            {
+                var target = configMgr.PackageId is { } id ? $"update {id}" : $"new package in {configMgr.PackageSourcePath}";
+                Console.WriteLine($"Publish: {configMgr.SiteServer} ({configMgr.Transport}), {target}");
+            }
+
             if (recipe.Updates is { } updates && Directory.Exists(updates.Folder))
             {
                 var files = UpdatePlanner.Scan(updates.Folder);
