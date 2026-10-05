@@ -13,4 +13,9 @@
     <InternalsVisibleTo Include="Familiar.Core.Tests" />
   </ItemGroup>
 
+  <!-- Offline fallback for release data; refresh with eng/Update-ReleaseSnapshot.ps1. -->
+  <ItemGroup>
+    <EmbeddedResource Include="Releases\Snapshot\*.json" LogicalName="Familiar.Core.Releases.Snapshot.%(Filename)%(Extension)" />
+  </ItemGroup>
+
 </Project>

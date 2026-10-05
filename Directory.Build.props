@@ -12,7 +12,7 @@
     <Product>Familiar</Product>
     <Copyright>Copyright (c) 2026 Jacob Thornberry</Copyright>
     <RepositoryType>git</RepositoryType>
-    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageLicenseExpression>BSD-3-Clause</PackageLicenseExpression>
 
     <!-- Familiar services Windows images, so every project targets Windows. -->
     <FamiliarTargetFramework>net10.0-windows10.0.26100.0</FamiliarTargetFramework>

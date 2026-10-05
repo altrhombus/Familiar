@@ -67,4 +67,4 @@ and the quirks of each Windows release. No WIM Witch code is included.
 
 ## License
 
-[MIT](LICENSE)
+[BSD 3-Clause](LICENSE)

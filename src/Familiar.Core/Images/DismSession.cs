@@ -33,8 +33,7 @@ public sealed class DismSession : IDisposable
                 i.InstallationType,
                 i.Architecture.ToString(),
                 i.ProductVersion,
-                i.DefaultLanguage?.Name,
-                WindowsReleaseCatalog.Resolve(i.ProductVersion.Build, i.InstallationType)))
+                i.DefaultLanguage?.Name))
             .ToList();
     }
 
