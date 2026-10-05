@@ -21,11 +21,13 @@ public sealed class DismHost : IDisposable
         if (logFilePath is null)
         {
             DismApi.Initialize(DismLogLevel.LogErrors);
+            return;
         }
-        else
-        {
-            DismApi.Initialize(DismLogLevel.LogErrorsWarnings, logFilePath);
-        }
+
+        // DISM fails with DISMAPI_E_LOGGING_DISABLED rather than creating the log's folder.
+        var fullPath = Path.GetFullPath(logFilePath);
+        Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
+        DismApi.Initialize(DismLogLevel.LogErrorsWarnings, fullPath);
     }
 
     /// <summary>Lists the indexes in a WIM or ESD file.</summary>

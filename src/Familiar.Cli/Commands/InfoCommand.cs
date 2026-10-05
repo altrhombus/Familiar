@@ -38,8 +38,19 @@ internal static class InfoCommand
             var catalog = await CatalogOptions.LoadAsync(parseResult, cancellationToken);
             var today = DateOnly.FromDateTime(DateTime.Today);
 
-            using var dism = new DismHost();
-            foreach (var index in dism.GetIndexes(file.FullName))
+            IReadOnlyList<ImageIndexInfo> indexes;
+            try
+            {
+                using var dism = new DismHost();
+                indexes = dism.GetIndexes(file.FullName);
+            }
+            catch (Exception ex) when (DismErrors.Describe(ex) is { } description)
+            {
+                Console.Error.WriteLine($"error: {description}");
+                return ExitCodes.Failure;
+            }
+
+            foreach (var index in indexes)
             {
                 var release = catalog.Resolve(index.Version.Build, index.InstallationType);
 

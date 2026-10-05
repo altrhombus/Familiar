@@ -32,11 +32,11 @@ internal static class BuildCommand
                 return ExitCodes.Invalid;
             }
 
-            using var dism = new DismHost(parseResult.GetValue(logFile)?.FullName);
             var progress = new ConsoleProgress();
 
             try
             {
+                using var dism = new DismHost(parseResult.GetValue(logFile)?.FullName);
                 var result = await new BuildRunner().RunAsync(recipe, progress, progress.Log, cancellationToken);
                 foreach (var warning in result.Warnings)
                 {
@@ -53,6 +53,11 @@ internal static class BuildCommand
             catch (OperationCanceledException)
             {
                 progress.Log("Cancelled; changes were discarded.");
+                return ExitCodes.Failure;
+            }
+            catch (Exception ex) when (DismErrors.Describe(ex) is { } description)
+            {
+                progress.Log($"error: {description}");
                 return ExitCodes.Failure;
             }
         });
