@@ -3,6 +3,7 @@
   <PropertyGroup>
     <TargetFramework>$(FamiliarTargetFramework)</TargetFramework>
     <RootNamespace>Familiar.Core</RootNamespace>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
   <ItemGroup>
