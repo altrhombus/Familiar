@@ -7,8 +7,8 @@ Configuration Manager or packs it into an ISO.
 Familiar is a C# successor to [WIM Witch](https://github.com/thenotoriousdrr/WIM-Witch), which is no
 longer maintained.
 
-> **Status:** early. Release data, language planning and recipe-driven language builds are written;
-> the build path has not yet been run end to end against a real image.
+> **Status:** early. Recipe-driven language builds work end to end: a Windows 11 25H2 Enterprise image
+> has been built with German and Japanese (including WinRE) from the 24H2/25H2 language media.
 
 ## Layout
 
@@ -44,8 +44,8 @@ longer maintained.
 
 ## Roadmap
 
-1. ~~Mount/dismount, index selection, export~~ (written, needs an end-to-end run)
-2. ~~Languages: language packs, language FODs, WinRE languages, default UI language~~ (written, needs an end-to-end run)
+1. ~~Mount/dismount, index selection, export~~
+2. ~~Languages: language packs, language FODs, WinRE languages, default UI language~~
 3. ~~Recipes (JSON) and the CLI build command~~
 4. Updates: LCU, checkpoint CUs, .NET, Setup Dynamic Update; boot.wim and WinRE
 5. Languages for install media: boot.wim, `lang.ini`; re-provisioning inbox apps from the Inbox Apps ISO

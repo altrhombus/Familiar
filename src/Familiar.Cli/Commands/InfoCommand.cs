@@ -56,7 +56,9 @@ internal static class InfoCommand
 
                 Console.WriteLine($"[{index.Index}] {index.Name}");
                 Console.WriteLine($"    Edition:   {index.EditionId} / {index.InstallationType} / {index.Architecture}");
-                Console.WriteLine($"    Language:  {index.DefaultLanguage ?? "unknown"}");
+                var others = index.Languages.Where(l => !string.Equals(l, index.DefaultLanguage, StringComparison.OrdinalIgnoreCase)).ToList();
+                var also = others.Count > 0 ? $" (also {string.Join(", ", others)})" : string.Empty;
+                Console.WriteLine($"    Language:  {index.DefaultLanguage ?? "unknown"}{also}");
 
                 if (release is null)
                 {

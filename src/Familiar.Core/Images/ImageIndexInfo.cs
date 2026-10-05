@@ -8,4 +8,5 @@ public sealed record ImageIndexInfo(
     string InstallationType,
     string Architecture,
     Version Version,
-    string? DefaultLanguage);
+    string? DefaultLanguage,
+    IReadOnlyList<string> Languages);

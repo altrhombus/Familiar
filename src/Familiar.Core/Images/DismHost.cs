@@ -43,7 +43,8 @@ public sealed class DismHost : IDisposable
                 i.InstallationType,
                 i.Architecture.ToString(),
                 i.ProductVersion,
-                i.DefaultLanguage?.Name))
+                i.DefaultLanguage?.Name,
+                i.Languages.Select(l => l.Name).ToList()))
             .ToList();
     }
 
