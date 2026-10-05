@@ -36,7 +36,9 @@ longer maintained.
 - **Configuration Manager without the console.** Builds publish straight to an OS image package: copy to the
   package source, create or update, reload image properties, distribute or refresh. The AdminService (REST)
   is tried first and WMI to the SMS Provider is the fallback; neither needs the ConfigMgr console or
-  PowerShell module on the build machine.
+  PowerShell module on the build machine. Updating an existing package changes what its task sequences
+  deploy, so point recipes at a test package first: the replaced WIM is kept as `.previous` for
+  `familiar configmgr rollback`, and `refreshDistributionPoints: false` holds the new image back from DPs.
 - **Inbox apps follow the languages.** Apps already in the image are re-provisioned from the Inbox Apps ISO so
   their bundles add resources for newly added languages. Dependencies come from each app's own manifest.
 - **Updates downloaded for you.** The latest cumulative update comes from the release data; Familiar finds it

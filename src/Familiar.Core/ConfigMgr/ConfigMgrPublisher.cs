@@ -20,9 +20,17 @@ public sealed record ConfigMgrPublishRequest
     public IReadOnlyList<string> DistributionPointGroups { get; init; } = [];
 
     public IReadOnlyList<string> DistributionPoints { get; init; } = [];
+
+    /// <summary>
+    /// For existing packages: push the new source to distribution points right away. When false the source and
+    /// image properties are updated but distribution points keep serving the previous content until someone
+    /// updates them (console: Update Distribution Points), which leaves room to test first.
+    /// </summary>
+    public bool RefreshDistributionPoints { get; init; } = true;
 }
 
-public sealed record ConfigMgrPublishResult(string PackageId, bool Created, IReadOnlyList<string> Warnings);
+/// <param name="PreviousImagePath">Where the replaced WIM was kept, when an existing package was updated.</param>
+public sealed record ConfigMgrPublishResult(string PackageId, bool Created, string? PreviousImagePath, IReadOnlyList<string> Warnings);
 
 /// <summary>
 /// Puts a built WIM into Configuration Manager: copy to the package source, create or update the OS image
@@ -53,6 +61,7 @@ public sealed class ConfigMgrPublisher(IConfigMgrConnection connection)
 
         string packageId;
         bool created;
+        string? previous = null;
         if (request.PackageId is { } existingId)
         {
             var package = await connection.GetImagePackageAsync(existingId, cancellationToken).ConfigureAwait(false)
@@ -63,6 +72,15 @@ public sealed class ConfigMgrPublisher(IConfigMgrConnection connection)
             }
 
             log($"Updating OS image package {package.PackageId} ({package.Name}); source {package.SourcePath}");
+
+            // Task sequences deploy whatever the package source holds, so keep the replaced image for rollback.
+            if (File.Exists(package.SourcePath))
+            {
+                previous = PreviousImagePath(package.SourcePath);
+                log($"Keeping the current image as {previous}");
+                File.Copy(package.SourcePath, previous, overwrite: true);
+            }
+
             await CopyAsync(wimPath, package.SourcePath, progress, cancellationToken).ConfigureAwait(false);
 
             if (request.Version is not null || request.Description is not null)
@@ -97,10 +115,14 @@ public sealed class ConfigMgrPublisher(IConfigMgrConnection connection)
         log($"Reloading image properties for {packageId}");
         await connection.ReloadImagePropertiesAsync(packageId, cancellationToken).ConfigureAwait(false);
 
-        if (!created)
+        if (!created && request.RefreshDistributionPoints)
         {
             log("Refreshing distribution points that already have the package");
             await connection.RefreshDistributionPointsAsync(packageId, cancellationToken).ConfigureAwait(false);
+        }
+        else if (!created)
+        {
+            warnings.Add($"Distribution points still serve the previous content of {packageId}. Update them from the console when the new image is tested, or run 'familiar configmgr rollback' to restore the previous image.");
         }
 
         var targeted = created ? [] : await connection.GetPackageTargetsAsync(packageId, cancellationToken).ConfigureAwait(false);
@@ -131,8 +153,41 @@ public sealed class ConfigMgrPublisher(IConfigMgrConnection connection)
         }
 
         log($"Published {packageId} on site {connection.SiteCode} via {connection.Transport}");
-        return new ConfigMgrPublishResult(packageId, created, warnings);
+        return new ConfigMgrPublishResult(packageId, created, previous, warnings);
     }
+
+    /// <summary>
+    /// Restores the image kept by the last update of <paramref name="packageId"/>, reloads image properties and
+    /// refreshes distribution points. The rolled-back image is kept as <c>.rejected</c> for inspection.
+    /// </summary>
+    public async Task RollbackAsync(string packageId, Action<string>? log = null, CancellationToken cancellationToken = default)
+    {
+        log ??= _ => { };
+        var package = await connection.GetImagePackageAsync(packageId, cancellationToken).ConfigureAwait(false)
+            ?? throw new ConfigMgrException($"OS image package {packageId} was not found on site {connection.SiteCode}.");
+        var source = package.SourcePath ?? throw new ConfigMgrException($"OS image package {packageId} has no source path.");
+        var previous = PreviousImagePath(source);
+        if (!File.Exists(previous))
+        {
+            throw new ConfigMgrException($"No previous image to roll back to ({previous} does not exist).");
+        }
+
+        log($"Restoring {previous} to {source}");
+        if (File.Exists(source))
+        {
+            File.Move(source, source + ".rejected", overwrite: true);
+        }
+
+        File.Move(previous, source);
+
+        log($"Reloading image properties for {package.PackageId}");
+        await connection.ReloadImagePropertiesAsync(package.PackageId, cancellationToken).ConfigureAwait(false);
+        log("Refreshing distribution points");
+        await connection.RefreshDistributionPointsAsync(package.PackageId, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Where the replaced image is kept: beside the source, under a name the package does not reference.</summary>
+    public static string PreviousImagePath(string sourcePath) => sourcePath + ".previous";
 
     private async Task<IReadOnlyList<DistributionPointGroup>> ResolveGroupsAsync(IReadOnlyList<string> names, CancellationToken cancellationToken)
     {

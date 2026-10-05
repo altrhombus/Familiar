@@ -10,7 +10,40 @@ internal static class ConfigMgrCommand
     {
         CreateInfo(),
         CreatePublish(),
+        CreateRollback(),
     };
+
+    private static Command CreateRollback()
+    {
+        var recipePath = new Argument<FileInfo>("recipe") { Description = "Recipe whose configMgr.packageId to roll back." };
+        var command = new Command("rollback", "Restore the image an update replaced (kept as .previous) and refresh distribution points.") { recipePath };
+
+        command.SetAction(async (parseResult, cancellationToken) =>
+        {
+            var recipe = await RecipeCommand.LoadAsync(parseResult.GetValue(recipePath)!, cancellationToken);
+            if (recipe?.ConfigMgr is not { PackageId: { } packageId } section)
+            {
+                Console.Error.WriteLine("The recipe needs a configMgr section with packageId to roll back.");
+                return ExitCodes.Invalid;
+            }
+
+            var progress = new ConsoleProgress();
+            try
+            {
+                await using var connection = await ConfigMgrConnector.ConnectAsync(section.SiteServer, section.SiteCode, section.Transport, progress.Log, cancellationToken);
+                await new ConfigMgrPublisher(connection).RollbackAsync(packageId, progress.Log, cancellationToken);
+                progress.Log($"Rolled back {packageId}");
+                return ExitCodes.Success;
+            }
+            catch (Exception ex) when (ex is ConfigMgrException or IOException or UnauthorizedAccessException)
+            {
+                progress.Log($"error: {ex.Message}");
+                return ExitCodes.Failure;
+            }
+        });
+
+        return command;
+    }
 
     private static Command CreateInfo()
     {

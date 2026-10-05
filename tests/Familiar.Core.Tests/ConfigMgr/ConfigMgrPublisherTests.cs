@@ -67,6 +67,65 @@ public sealed class ConfigMgrPublisherTests : IDisposable
     }
 
     [Fact]
+    public async Task ExistingPackage_KeepsReplacedImageForRollback()
+    {
+        var source = Path.Combine(_root, "share", "install.wim");
+        Directory.CreateDirectory(Path.GetDirectoryName(source)!);
+        File.WriteAllBytes(source, [9]);
+        var site = new FakeSite { Existing = new ImagePackage("PS100123", "Win11", "1", null, source, null) };
+
+        var result = await new ConfigMgrPublisher(site).PublishAsync(_wim,
+            new ConfigMgrPublishRequest { PackageId = "PS100123", Name = "x" }, cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Equal(source + ".previous", result.PreviousImagePath);
+        Assert.Equal([9], File.ReadAllBytes(source + ".previous"));
+        Assert.Equal([1, 2, 3, 4], File.ReadAllBytes(source));
+    }
+
+    [Fact]
+    public async Task ExistingPackage_WithoutRefresh_LeavesDistributionPointsAlone()
+    {
+        var source = Path.Combine(_root, "install.wim");
+        var site = new FakeSite { Existing = new ImagePackage("PS100123", "Win11", "1", null, source, null) };
+
+        var result = await new ConfigMgrPublisher(site).PublishAsync(_wim,
+            new ConfigMgrPublishRequest { PackageId = "PS100123", Name = "x", RefreshDistributionPoints = false },
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.DoesNotContain("refresh PS100123", site.Calls);
+        Assert.Contains("reload PS100123", site.Calls);
+        Assert.Contains(result.Warnings, w => w.Contains("still serve the previous content", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Rollback_RestoresPreviousImage_KeepsRejectedOne()
+    {
+        var source = Path.Combine(_root, "share", "install.wim");
+        Directory.CreateDirectory(Path.GetDirectoryName(source)!);
+        File.WriteAllBytes(source, [9]);
+        var site = new FakeSite { Existing = new ImagePackage("PS100123", "Win11", "1", null, source, null) };
+        var publisher = new ConfigMgrPublisher(site);
+        await publisher.PublishAsync(_wim, new ConfigMgrPublishRequest { PackageId = "PS100123", Name = "x" }, cancellationToken: TestContext.Current.CancellationToken);
+        site.Calls.Clear();
+
+        await publisher.RollbackAsync("PS100123", cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Equal([9], File.ReadAllBytes(source));
+        Assert.Equal([1, 2, 3, 4], File.ReadAllBytes(source + ".rejected"));
+        Assert.False(File.Exists(source + ".previous"));
+        Assert.Equal(["reload PS100123", "refresh PS100123"], site.Calls);
+    }
+
+    [Fact]
+    public async Task Rollback_WithoutPreviousImage_Fails()
+    {
+        var site = new FakeSite { Existing = new ImagePackage("PS100123", "Win11", "1", null, Path.Combine(_root, "none.wim"), null) };
+
+        await Assert.ThrowsAsync<ConfigMgrException>(() => new ConfigMgrPublisher(site).RollbackAsync("PS100123", cancellationToken: TestContext.Current.CancellationToken));
+        Assert.Empty(site.Calls);
+    }
+
+    [Fact]
     public async Task VersionUpdateRejected_IsAWarningNotAFailure()
     {
         var source = Path.Combine(_root, "install.wim");

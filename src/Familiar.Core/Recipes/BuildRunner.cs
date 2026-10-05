@@ -133,6 +133,7 @@ public sealed class BuildRunner(
                 Description = section.Description,
                 DistributionPointGroups = section.DistributionPointGroups,
                 DistributionPoints = section.DistributionPoints,
+                RefreshDistributionPoints = section.RefreshDistributionPoints,
             };
 
             var result = await new ConfigMgrPublisher(connection).PublishAsync(wimPath, request, progress, log, cancellationToken).ConfigureAwait(false);

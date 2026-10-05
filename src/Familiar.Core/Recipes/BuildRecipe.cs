@@ -45,8 +45,18 @@ public sealed record ConfigMgrSection
 
     public ConfigMgr.ConfigMgrTransport Transport { get; set; } = ConfigMgr.ConfigMgrTransport.Auto;
 
-    /// <summary>Existing OS image package to update. Omit to create a new one.</summary>
+    /// <summary>
+    /// Existing OS image package to update. Omit to create a new one. Task sequences using this package deploy
+    /// whatever its source holds, so point recipes at a test package first; the replaced WIM is kept as
+    /// <c>.previous</c> for <c>familiar configmgr rollback</c>.
+    /// </summary>
     public string? PackageId { get; init; }
+
+    /// <summary>
+    /// For an existing package, push the new image to its distribution points immediately (default). Set false to
+    /// update the source only and release it from the console once tested.
+    /// </summary>
+    public bool RefreshDistributionPoints { get; set; } = true;
 
     /// <summary>UNC folder the WIM is copied to for a new package, e.g. \\cm01\Sources$\OSD\Win11-25H2.</summary>
     public string? PackageSourcePath { get; init; }
