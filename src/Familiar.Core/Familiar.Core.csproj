@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>$(FamiliarTargetFramework)</TargetFramework>
+    <RootNamespace>Familiar.Core</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Dism" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Familiar.Core.Tests" />
+  </ItemGroup>
+
+</Project>
