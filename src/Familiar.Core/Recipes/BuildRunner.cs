@@ -133,14 +133,14 @@ public sealed class BuildRunner(DismCommand? dismCommand = null)
                 if (languages.DefaultLanguage is { } defaultLanguage)
                 {
                     log($"Setting default language to {defaultLanguage}");
-                    await Run(_dism.SetAllInternationalAsync(image.MountPath, defaultLanguage, progress, cancellationToken)).ConfigureAwait(false);
+                    await Run(image.RunExternalAsync(mount => _dism.SetAllInternationalAsync(mount, defaultLanguage, progress, cancellationToken))).ConfigureAwait(false);
                 }
             }
 
             if (recipe.Output.CleanupComponents)
             {
                 log("Cleaning up components");
-                await Run(_dism.CleanupComponentsAsync(image.MountPath, resetBase: false, progress, cancellationToken)).ConfigureAwait(false);
+                await Run(image.RunExternalAsync(mount => _dism.CleanupComponentsAsync(mount, resetBase: false, progress, cancellationToken))).ConfigureAwait(false);
             }
 
             log("Saving image");
@@ -204,12 +204,12 @@ public sealed class BuildRunner(DismCommand? dismCommand = null)
 
             if (languages.DefaultLanguage is { } defaultLanguage && media.WinPE.ContainsKey(defaultLanguage))
             {
-                await Run(_dism.SetAllInternationalAsync(recovery.MountPath, defaultLanguage, progress, cancellationToken)).ConfigureAwait(false);
+                await Run(recovery.RunExternalAsync(mount => _dism.SetAllInternationalAsync(mount, defaultLanguage, progress, cancellationToken))).ConfigureAwait(false);
             }
 
             if (cleanup)
             {
-                await Run(_dism.CleanupComponentsAsync(recovery.MountPath, resetBase: true, progress, cancellationToken)).ConfigureAwait(false);
+                await Run(recovery.RunExternalAsync(mount => _dism.CleanupComponentsAsync(mount, resetBase: true, progress, cancellationToken))).ConfigureAwait(false);
             }
 
             await recovery.CommitAsync(progress, cancellationToken).ConfigureAwait(false);

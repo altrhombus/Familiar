@@ -122,6 +122,27 @@ public sealed class MountedImage : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// Runs a dism.exe operation against the mount. DISM allows one servicing session per image, so the API
+    /// session is closed for the duration (otherwise dism.exe fails with error 183) and reopened afterwards.
+    /// </summary>
+    public async Task<T> RunExternalAsync<T>(Func<string, Task<T>> operation)
+    {
+        ArgumentNullException.ThrowIfNull(operation);
+        ObjectDisposedException.ThrowIf(_session is null || _unmounted, this);
+
+        _session!.Dispose();
+        _session = null;
+        try
+        {
+            return await operation(MountPath).ConfigureAwait(false);
+        }
+        finally
+        {
+            _session = DismApi.OpenOfflineSession(MountPath);
+        }
+    }
+
     /// <summary>Saves changes to the WIM and unmounts.</summary>
     public Task CommitAsync(IProgress<ServicingProgress>? progress = null, CancellationToken cancellationToken = default) =>
         UnmountAsync(commit: true, progress, cancellationToken);
