@@ -75,6 +75,20 @@ public sealed class MountedImage : IAsyncDisposable
     public int? GetServicingBaselineBuild() =>
         GetPackages().FirstOrDefault(p => p.Name.Equals(PackageIdentity.FoundationPackage, StringComparison.OrdinalIgnoreCase))?.Version?.Build;
 
+    /// <summary>DisplayVersion, build and edition from the image's own registry, via the hive DISM already loaded.</summary>
+    public OfflineWindowsVersion ReadWindowsVersion()
+    {
+        var mountPoint = DismApi.GetRegistryMountPoint(Session, DismRegistryHive.Software);
+        try
+        {
+            return OfflineRegistry.ReadVersion(mountPoint);
+        }
+        catch (Exception ex) when (ex is FormatException or InvalidOperationException or IOException or UnauthorizedAccessException)
+        {
+            throw new InvalidOperationException($"{ex.Message} (registry mount point: '{mountPoint}')", ex);
+        }
+    }
+
     public ImageLanguageState GetLanguageState()
     {
         var languages = GetPackages()

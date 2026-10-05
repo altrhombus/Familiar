@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Globalization;
 using Microsoft.Win32;
 
@@ -7,65 +6,59 @@ namespace Familiar.Core.Servicing;
 /// <summary>Version details read from a mounted image's SOFTWARE hive.</summary>
 public sealed record OfflineWindowsVersion(string? DisplayVersion, string? ReleaseId, int? CurrentBuild, int? UpdateBuildRevision, string? EditionId);
 
+/// <summary>
+/// Reads registry values from hives DISM has loaded for an offline session. DISM loads the image's hives
+/// itself when a session opens, so loading them again with <c>reg load</c> fails with a sharing violation.
+/// </summary>
 public static class OfflineRegistry
 {
-    /// <summary>
-    /// Reads <c>HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion</c> from a mounted image. This is the reliable
-    /// source for releases whose WIM metadata reports the base build (e.g. Windows 10 20H2).
-    /// </summary>
-    public static OfflineWindowsVersion ReadVersion(string mountPath)
-    {
-        var hive = Path.Combine(mountPath, "Windows", "System32", "config", "SOFTWARE");
-        if (!File.Exists(hive))
-        {
-            throw new FileNotFoundException("The mounted image has no SOFTWARE hive.", hive);
-        }
+    private const string CurrentVersionPath = @"Microsoft\Windows NT\CurrentVersion";
 
-        // A unique key name avoids colliding with another tool (or another Familiar run) that left a hive loaded.
-        var keyName = "Familiar_" + Guid.NewGuid().ToString("N")[..8];
-        Reg("load", $@"HKLM\{keyName}", hive);
-        try
-        {
-            using var key = Registry.LocalMachine.OpenSubKey($@"{keyName}\Microsoft\Windows NT\CurrentVersion");
-            return new OfflineWindowsVersion(
-                key?.GetValue("DisplayVersion") as string,
-                key?.GetValue("ReleaseId") as string,
-                ParseInt(key?.GetValue("CurrentBuild")),
-                key?.GetValue("UBR") is int ubr ? ubr : null,
-                key?.GetValue("EditionID") as string);
-        }
-        finally
-        {
-            // Open handles keep the hive loaded; make sure the key above is closed before unloading.
-            GC.Collect();
-            GC.WaitForPendingFinalizers();
-            Reg("unload", $@"HKLM\{keyName}");
-        }
+    /// <summary>Reads <c>Microsoft\Windows NT\CurrentVersion</c> under the hive DISM mounted at <paramref name="mountPoint"/>.</summary>
+    public static OfflineWindowsVersion ReadVersion(string mountPoint)
+    {
+        var (root, path) = ParseMountPoint(mountPoint);
+        using var key = root.OpenSubKey(path + @"\" + CurrentVersionPath)
+            ?? throw new InvalidOperationException($"The image's SOFTWARE hive at '{mountPoint}' has no CurrentVersion key.");
+
+        return new OfflineWindowsVersion(
+            key.GetValue("DisplayVersion") as string,
+            key.GetValue("ReleaseId") as string,
+            key.GetValue("CurrentBuild") is string build && int.TryParse(build, CultureInfo.InvariantCulture, out var b) ? b : null,
+            key.GetValue("UBR") is int ubr ? ubr : null,
+            key.GetValue("EditionID") as string);
     }
 
-    private static int? ParseInt(object? value) =>
-        value is string s && int.TryParse(s, CultureInfo.InvariantCulture, out var result) ? result : null;
-
-    private static void Reg(params string[] arguments)
+    /// <summary>
+    /// Splits a registry mount point into a root key and subkey path. Accepts Win32 forms
+    /// (<c>HKEY_LOCAL_MACHINE\x</c>, <c>HKLM\x</c>) and native forms (<c>\Registry\Machine\x</c>).
+    /// </summary>
+    internal static (RegistryKey Root, string Path) ParseMountPoint(string mountPoint)
     {
-        var startInfo = new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "reg.exe"))
+        ArgumentException.ThrowIfNullOrWhiteSpace(mountPoint);
+        var value = mountPoint.Trim().TrimEnd('\\');
+
+        (string Prefix, RegistryKey Root)[] roots =
+        [
+            (@"\Registry\Machine\", Registry.LocalMachine),
+            (@"\Registry\User\", Registry.Users),
+            (@"HKEY_LOCAL_MACHINE\", Registry.LocalMachine),
+            (@"HKLM\", Registry.LocalMachine),
+            (@"HKEY_USERS\", Registry.Users),
+            (@"HKU\", Registry.Users),
+        ];
+
+        foreach (var (prefix, root) in roots)
         {
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-        };
-        foreach (var argument in arguments)
-        {
-            startInfo.ArgumentList.Add(argument);
+            if (value.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                return (root, value[prefix.Length..]);
+            }
         }
 
-        using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("reg.exe did not start.");
-        var error = process.StandardError.ReadToEnd();
-        process.WaitForExit();
-        if (process.ExitCode != 0)
-        {
-            throw new InvalidOperationException($"reg {arguments[0]} failed: {error.Trim()}");
-        }
+        // A bare key name is relative to HKLM, where DISM loads offline hives.
+        return value.Contains('\\', StringComparison.Ordinal) && !value.StartsWith('\\')
+            ? throw new FormatException($"Unrecognized registry mount point '{mountPoint}'.")
+            : (Registry.LocalMachine, value.TrimStart('\\'));
     }
 }

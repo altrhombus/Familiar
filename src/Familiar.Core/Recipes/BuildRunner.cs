@@ -80,8 +80,17 @@ public sealed class BuildRunner(DismCommand? dismCommand = null)
         await using (var image = await MountedImage.MountAsync(workImage, 1, Path.Combine(work, "mount"), progress, cancellationToken).ConfigureAwait(false))
         {
             var baseline = image.GetServicingBaselineBuild();
-            var version = OfflineRegistry.ReadVersion(image.MountPath);
-            log($"Image: {sourceName}, build {version.CurrentBuild}.{version.UpdateBuildRevision} ({version.DisplayVersion ?? version.ReleaseId}), servicing baseline {baseline}");
+            // Informational only: the baseline check below relies on the Foundation package, not the registry.
+            try
+            {
+                var version = image.ReadWindowsVersion();
+                log($"Image: {sourceName}, build {version.CurrentBuild}.{version.UpdateBuildRevision} ({version.DisplayVersion ?? version.ReleaseId}), servicing baseline {baseline}");
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException or System.Runtime.InteropServices.COMException)
+            {
+                warnings.Add($"Could not read the image's registry version: {ex.Message}");
+                log($"Image: {sourceName}, servicing baseline {baseline}");
+            }
 
             if (media is not null && recipe.Languages is { } languages)
             {
