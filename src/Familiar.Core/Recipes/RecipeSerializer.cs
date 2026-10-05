@@ -35,6 +35,7 @@ public static class RecipeSerializer
             Languages = ["de-DE", "ja-JP"],
             DefaultLanguage = "de-DE",
         },
+        Updates = new UpdatesSection { Folder = @"C:\Updates\Windows11-25H2" },
         Output = new OutputSection { Path = @"D:\Familiar\Output\install-de-ja.wim" },
     };
 
@@ -48,6 +49,7 @@ public static class RecipeSerializer
             Source = recipe.Source with { Path = Full(recipe.Source.Path) },
             WorkingDirectory = Full(recipe.WorkingDirectory),
             Languages = recipe.Languages is null ? null : recipe.Languages with { MediaPath = Full(recipe.Languages.MediaPath) },
+            Updates = recipe.Updates is null ? null : recipe.Updates with { Folder = Full(recipe.Updates.Folder) },
             Output = recipe.Output with { Path = Full(recipe.Output.Path) },
         };
     }

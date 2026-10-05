@@ -59,6 +59,11 @@ public static class RecipeValidator
             }
         }
 
+        if (checkFiles && recipe.Updates is { } updates && !Directory.Exists(updates.Folder))
+        {
+            errors.Add($"Updates folder not found: {updates.Folder}");
+        }
+
         if (checkFiles && !File.Exists(recipe.Source.Path))
         {
             errors.Add($"Source image not found: {recipe.Source.Path}");

@@ -16,7 +16,13 @@ internal static class BuildCommand
             Description = "Write the DISM API log here (useful when a package fails to apply).",
         };
 
-        var command = new Command("build", "Build an image from a recipe.") { path, logFile };
+        var command = new Command("build", "Build an image from a recipe.")
+        {
+            path,
+            logFile,
+            CatalogOptions.Offline,
+            CatalogOptions.Refresh,
+        };
 
         command.SetAction(async (parseResult, cancellationToken) =>
         {
@@ -32,12 +38,13 @@ internal static class BuildCommand
                 return ExitCodes.Invalid;
             }
 
+            var catalog = await CatalogOptions.LoadAsync(parseResult, cancellationToken);
             var progress = new ConsoleProgress();
 
             try
             {
                 using var dism = new DismHost(parseResult.GetValue(logFile)?.FullName);
-                var result = await new BuildRunner().RunAsync(recipe, progress, progress.Log, cancellationToken);
+                var result = await new BuildRunner(catalog).RunAsync(recipe, progress, progress.Log, cancellationToken);
                 foreach (var warning in result.Warnings)
                 {
                     progress.Log($"warning: {warning}");

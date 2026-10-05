@@ -1,6 +1,8 @@
 using System.Globalization;
 using Familiar.Core.Languages;
+using Familiar.Core.Releases;
 using Familiar.Core.Servicing;
+using Familiar.Core.Updates;
 using Microsoft.Dism;
 
 namespace Familiar.Core.Recipes;
@@ -14,7 +16,8 @@ public sealed record BuildResult(string OutputPath, IReadOnlyList<string> Warnin
 /// Runs a <see cref="BuildRecipe"/>. The source image is never modified: the chosen index is exported to a
 /// working copy, serviced there, and exported again to the output path. Requires an initialized DISM API.
 /// </summary>
-public sealed class BuildRunner(DismCommand? dismCommand = null)
+/// <param name="catalog">Release data, used to order updates and spot missing ones. Builds still run without it.</param>
+public sealed class BuildRunner(ReleaseCatalog? catalog = null, DismCommand? dismCommand = null)
 {
     private readonly DismCommand _dism = dismCommand ?? new DismCommand();
 
@@ -42,8 +45,19 @@ public sealed class BuildRunner(DismCommand? dismCommand = null)
         var media = recipe.Languages is null ? null : LanguageMedia.Scan(recipe.Languages.MediaPath);
         var mediaBuild = media is null ? null : await ReadMediaBuildAsync(media, cancellationToken).ConfigureAwait(false);
 
-        var sourceName = DismApi.GetImageInfo(recipe.Source.Path).FirstOrDefault(i => i.ImageIndex == recipe.Source.Index)?.ImageName
+        var updateFiles = recipe.Updates is null ? null : UpdatePlanner.Scan(recipe.Updates.Folder);
+        if (updateFiles is { Count: 0 })
+        {
+            throw new BuildException($"No .msu or .cab files with a KB number were found in {recipe.Updates!.Folder}.");
+        }
+
+        var info = DismApi.GetImageInfo(recipe.Source.Path).FirstOrDefault(i => i.ImageIndex == recipe.Source.Index)
             ?? throw new BuildException($"Index {recipe.Source.Index} does not exist in {recipe.Source.Path}.");
+        var source = new SourceDetails(
+            info.ImageName,
+            info.InstallationType,
+            info.Architecture == DismProcessorArchitecture.ARM64 ? "arm64" : "x64",
+            updateFiles);
 
         var work = Path.Combine(recipe.WorkingDirectory, DateTime.Now.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture));
         Directory.CreateDirectory(work);
@@ -51,7 +65,7 @@ public sealed class BuildRunner(DismCommand? dismCommand = null)
 
         try
         {
-            await BuildAsync(recipe, media, mediaBuild, sourceName, work, warnings, progress, log, cancellationToken).ConfigureAwait(false);
+            await BuildAsync(recipe, media, mediaBuild, source, work, warnings, progress, log, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
@@ -67,7 +81,7 @@ public sealed class BuildRunner(DismCommand? dismCommand = null)
         BuildRecipe recipe,
         LanguageMedia? media,
         int? mediaBuild,
-        string sourceName,
+        SourceDetails source,
         string work,
         List<string> warnings,
         IProgress<ServicingProgress>? progress,
@@ -80,16 +94,18 @@ public sealed class BuildRunner(DismCommand? dismCommand = null)
         await using (var image = await MountedImage.MountAsync(workImage, 1, Path.Combine(work, "mount"), progress, cancellationToken).ConfigureAwait(false))
         {
             var baseline = image.GetServicingBaselineBuild();
-            // Informational only: the baseline check below relies on the Foundation package, not the registry.
+
+            // The baseline check relies on the Foundation package; the registry adds the display version and revision.
+            OfflineWindowsVersion? version = null;
             try
             {
-                var version = image.ReadWindowsVersion();
-                log($"Image: {sourceName}, build {version.CurrentBuild}.{version.UpdateBuildRevision} ({version.DisplayVersion ?? version.ReleaseId}), servicing baseline {baseline}");
+                version = image.ReadWindowsVersion();
+                log($"Image: {source.Name}, build {version.CurrentBuild}.{version.UpdateBuildRevision} ({version.DisplayVersion ?? version.ReleaseId}), servicing baseline {baseline}");
             }
             catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException or System.Runtime.InteropServices.COMException)
             {
                 warnings.Add($"Could not read the image's registry version: {ex.Message}");
-                log($"Image: {sourceName}, servicing baseline {baseline}");
+                log($"Image: {source.Name}, servicing baseline {baseline}");
             }
 
             if (media is not null && recipe.Languages is { } languages)
@@ -137,6 +153,23 @@ public sealed class BuildRunner(DismCommand? dismCommand = null)
                 }
             }
 
+            // After languages, so the cumulative update also services the newly added language resources.
+            if (source.UpdateFiles is { } files)
+            {
+                var build = version?.CurrentBuild ?? baseline;
+                var release = build is null ? null : catalog?.Resolve(build.Value, source.InstallationType, version?.DisplayVersion ?? version?.ReleaseId);
+                var plan = UpdatePlanner.Plan(files, new UpdateTarget(release, source.Architecture, version?.UpdateBuildRevision), catalog);
+                warnings.AddRange(plan.Warnings);
+
+                log($"Adding {plan.Actions.Count} updates");
+                foreach (var action in plan.Actions)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    log($"  {action.Description}");
+                    await image.ApplyAsync(action, progress, cancellationToken).ConfigureAwait(false);
+                }
+            }
+
             if (recipe.Output.CleanupComponents)
             {
                 log("Cleaning up components");
@@ -149,8 +182,10 @@ public sealed class BuildRunner(DismCommand? dismCommand = null)
 
         // Exporting drops the space left behind by replaced files and stores the final name.
         Directory.CreateDirectory(Path.GetDirectoryName(recipe.Output.Path)!);
-        await Run(_dism.ExportImageAsync(workImage, 1, recipe.Output.Path, recipe.Output.ImageName ?? sourceName, progress, cancellationToken)).ConfigureAwait(false);
+        await Run(_dism.ExportImageAsync(workImage, 1, recipe.Output.Path, recipe.Output.ImageName ?? source.Name, progress, cancellationToken)).ConfigureAwait(false);
     }
+
+    private sealed record SourceDetails(string Name, string InstallationType, string Architecture, IReadOnlyList<UpdateFile>? UpdateFiles);
 
     private static void TryDelete(string folder, Action<string> log)
     {

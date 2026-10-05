@@ -25,6 +25,8 @@ public sealed record BuildRecipe
 
     public LanguagesSection? Languages { get; init; }
 
+    public UpdatesSection? Updates { get; init; }
+
     public required OutputSection Output { get; init; }
 }
 
@@ -53,6 +55,15 @@ public sealed record LanguagesSection
 
     /// <summary>Also localize Windows Recovery (WinRE) inside the image.</summary>
     public bool UpdateWinRE { get; set; } = true;
+}
+
+public sealed record UpdatesSection
+{
+    /// <summary>
+    /// Folder of .msu/.cab files, applied after languages. For 24H2 and later, download every file the Microsoft
+    /// Update Catalog lists for the cumulative update; checkpoint updates are applied first automatically.
+    /// </summary>
+    public required string Folder { get; init; }
 }
 
 public sealed record OutputSection

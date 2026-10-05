@@ -47,7 +47,7 @@ longer maintained.
 1. ~~Mount/dismount, index selection, export~~
 2. ~~Languages: language packs, language FODs, WinRE languages, default UI language~~
 3. ~~Recipes (JSON) and the CLI build command~~
-4. Updates: LCU, checkpoint CUs, .NET, Setup Dynamic Update; boot.wim and WinRE
+4. ~~Updates: LCU, checkpoint CUs and .NET from a folder~~; still to do: Safe OS and Setup Dynamic Updates for WinRE and media
 5. Languages for install media: boot.wim, `lang.ini`; re-provisioning inbox apps from the Inbox Apps ISO
 6. Drivers, .NET 3.5, provisioned app removal, registry files, custom scripts
 7. Configuration Manager: create/update OS image packages, distribute content, update catalog downloads

@@ -3,6 +3,7 @@ using System.Text.Json;
 using Familiar.Core.Languages;
 using Familiar.Core.Recipes;
 using Familiar.Core.Servicing;
+using Familiar.Core.Updates;
 
 namespace Familiar.Cli.Commands;
 
@@ -44,7 +45,12 @@ internal static class RecipeCommand
     private static Command CreateCheck()
     {
         var path = new Argument<FileInfo>("path") { Description = "Recipe to check." };
-        var command = new Command("check", "Validate a recipe and its media without changing anything.") { path };
+        var command = new Command("check", "Validate a recipe and its media without changing anything.")
+        {
+            path,
+            CatalogOptions.Offline,
+            CatalogOptions.Refresh,
+        };
 
         command.SetAction(async (parseResult, cancellationToken) =>
         {
@@ -74,6 +80,29 @@ internal static class RecipeCommand
                 }
 
                 errors.AddRange(plan.Errors);
+            }
+
+            if (recipe.Updates is { } updates && Directory.Exists(updates.Folder))
+            {
+                var files = UpdatePlanner.Scan(updates.Folder);
+                if (files.Count == 0)
+                {
+                    errors.Add($"No .msu or .cab files with a KB number were found in {updates.Folder}.");
+                }
+                else
+                {
+                    // The image's exact release is only known once it is mounted; describe each KB from the release data.
+                    var catalog = await CatalogOptions.LoadAsync(parseResult, cancellationToken);
+                    Console.WriteLine($"Updates: {updates.Folder}");
+                    foreach (var file in files)
+                    {
+                        var known = catalog.Updates.Where(u => u.KbArticle.Equals(file.Kb, StringComparison.OrdinalIgnoreCase)).ToList();
+                        var description = known.Count == 0
+                            ? "not a Windows cumulative update in the release data (applied last; expected for .NET)"
+                            : $"{string.Join("/", known.Select(u => u.WindowsVersion).Distinct())} {known[0].Type}, {known[0].ReleaseDate:yyyy-MM-dd}";
+                        Console.WriteLine($"         {file.Kb} [{file.Architecture ?? "any"}] {description}");
+                    }
+                }
             }
 
             foreach (var error in errors)
