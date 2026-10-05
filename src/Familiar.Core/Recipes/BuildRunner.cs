@@ -208,9 +208,15 @@ public sealed class BuildRunner(ReleaseCatalog? catalog = null, UpdateDownloader
             log($"Downloading updates for {release.Name} {architecture}: {selection.CumulativeUpdate.Title}"
                 + (selection.DotNet is { } dotNet ? $"; {dotNet.Title}" : string.Empty));
 
-            foreach (var file in await downloader.DownloadAsync(selection, updates.Folder, progress, cancellationToken).ConfigureAwait(false))
+            var result = await downloader.DownloadAsync(selection, updates.Folder, progress, cancellationToken).ConfigureAwait(false);
+            foreach (var file in result.Files)
             {
                 log($"  {Path.GetFileName(file.Path)}{(file.AlreadyPresent ? " (already downloaded)" : string.Empty)}");
+            }
+
+            foreach (var removed in result.Removed)
+            {
+                log($"  Removed superseded {Path.GetFileName(removed)}");
             }
         }
         catch (Exception ex) when (ex is HttpRequestException or InvalidOperationException or InvalidDataException or NotSupportedException)

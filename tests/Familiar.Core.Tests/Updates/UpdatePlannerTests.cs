@@ -56,6 +56,17 @@ public sealed class UpdatePlannerTests : IDisposable
     }
 
     [Fact]
+    public void Plan_KeepsOnlyTheNewestDotNetUpdate()
+    {
+        const string olderDotNet = @"C:\u\windows11.0-kb5120708-x64-ndp481_dddddddd.msu";
+
+        var plan = UpdatePlanner.Plan(Files(olderDotNet, DotNet, Target), new UpdateTarget(Release25H2, "x64", 6584), Catalog);
+
+        Assert.Equal([Target, DotNet], Paths(plan));
+        Assert.Contains(plan.Warnings, w => w.Contains("KB5120708", StringComparison.Ordinal) && w.Contains("newer .NET", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void Plan_SkipsOtherArchitectures()
     {
         var plan = UpdatePlanner.Plan(Files(Arm, Target), new UpdateTarget(Release25H2, "x64", 6584), Catalog);

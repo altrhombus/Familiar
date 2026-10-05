@@ -10,6 +10,41 @@ public sealed record UpdateSelection(CatalogEntry CumulativeUpdate, CatalogEntry
 
 public sealed record DownloadedFile(string Path, bool AlreadyPresent);
 
+/// <param name="Removed">Superseded files from Familiar's previous download that were deleted.</param>
+public sealed record DownloadResult(IReadOnlyList<DownloadedFile> Files, IReadOnlyList<string> Removed);
+
+/// <summary>Records which files in an updates folder Familiar downloaded, so it only ever prunes its own.</summary>
+internal static class DownloadManifest
+{
+    public static IReadOnlyList<string> Read(string folder)
+    {
+        var path = Path.Combine(folder, UpdateDownloader.ManifestFileName);
+        if (!File.Exists(path))
+        {
+            return [];
+        }
+
+        try
+        {
+            return System.Text.Json.JsonSerializer.Deserialize(File.ReadAllText(path), ManifestJsonContext.Default.StringArray) ?? [];
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            // A damaged manifest only means nothing is pruned this time.
+            return [];
+        }
+    }
+
+    public static void Write(string folder, IEnumerable<string> files) =>
+        File.WriteAllText(
+            Path.Combine(folder, UpdateDownloader.ManifestFileName),
+            System.Text.Json.JsonSerializer.Serialize(files.ToArray(), ManifestJsonContext.Default.StringArray));
+}
+
+[System.Text.Json.Serialization.JsonSourceGenerationOptions(WriteIndented = true)]
+[System.Text.Json.Serialization.JsonSerializable(typeof(string[]))]
+internal sealed partial class ManifestJsonContext : System.Text.Json.Serialization.JsonSerializerContext;
+
 /// <summary>Finds and downloads the latest updates for a release from the Microsoft Update Catalog.</summary>
 public sealed class UpdateDownloader(HttpClient http, ReleaseCatalog catalog)
 {
@@ -50,8 +85,16 @@ public sealed class UpdateDownloader(HttpClient http, ReleaseCatalog catalog)
         return new UpdateSelection(cumulative, dotNet);
     }
 
-    /// <summary>Downloads every file for the selected updates into <paramref name="folder"/>, verifying SHA-1.</summary>
-    public async Task<IReadOnlyList<DownloadedFile>> DownloadAsync(
+    /// <summary>Name of the file recording what Familiar downloaded into a folder.</summary>
+    public const string ManifestFileName = "familiar-downloads.json";
+
+    /// <summary>
+    /// Downloads every file for the selected updates into <paramref name="folder"/>, verifying SHA-1, then removes
+    /// files from Familiar's previous download that the new selection supersedes. Cumulative updates replace each
+    /// other, and every file left in the folder is installed, so stale ones only add build time. Files Familiar
+    /// did not download are never removed.
+    /// </summary>
+    public async Task<DownloadResult> DownloadAsync(
         UpdateSelection selection, string folder, IProgress<ServicingProgress>? progress = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(selection);
@@ -66,7 +109,20 @@ public sealed class UpdateDownloader(HttpClient http, ReleaseCatalog catalog)
             }
         }
 
-        return downloaded;
+        var current = downloaded.Select(d => Path.GetFileName(d.Path)).ToList();
+        var removed = new List<string>();
+        foreach (var previous in DownloadManifest.Read(folder).Except(current, StringComparer.OrdinalIgnoreCase))
+        {
+            var path = Path.Combine(folder, previous);
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+                removed.Add(path);
+            }
+        }
+
+        DownloadManifest.Write(folder, current);
+        return new DownloadResult(downloaded, removed);
     }
 
     private async Task<DownloadedFile> DownloadFileAsync(CatalogFile file, string folder, IProgress<ServicingProgress>? progress, CancellationToken cancellationToken)

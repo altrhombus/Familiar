@@ -112,6 +112,15 @@ public static partial class UpdatePlanner
             actions.Add(new AddPackageAction(file.Path, $"{update.KbArticle} cumulative update ({update.Build}.{update.Revision}, {update.ReleaseDate:yyyy-MM-dd})"));
         }
 
+        // .NET cumulative updates (file names carry "ndp", e.g. -ndp481_) supersede each other but are not in the
+        // release data, so keep only the newest; KB numbers rise over time.
+        var dotNet = unknown.Where(IsDotNet).ToList();
+        foreach (var stale in dotNet.OrderByDescending(f => KbNumber(f.Kb)).Skip(1))
+        {
+            warnings.Add($"Skipping {stale.Kb}: a newer .NET cumulative update is in the folder.");
+            unknown.Remove(stale);
+        }
+
         foreach (var file in unknown.OrderBy(f => KbNumber(f.Kb)))
         {
             if (branchUpdates.Count > 0)
@@ -131,6 +140,9 @@ public static partial class UpdatePlanner
 
         return new ServicingPlan(actions, warnings, []);
     }
+
+    private static bool IsDotNet(UpdateFile file) =>
+        System.IO.Path.GetFileName(file.Path).Contains("-ndp", StringComparison.OrdinalIgnoreCase);
 
     private static int KbNumber(string kb) =>
         int.TryParse(kb.AsSpan(2), NumberStyles.None, CultureInfo.InvariantCulture, out var number) ? number : int.MaxValue;

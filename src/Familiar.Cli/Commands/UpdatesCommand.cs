@@ -69,9 +69,15 @@ internal static class UpdatesCommand
                 }
 
                 var progress = new ConsoleProgress();
-                foreach (var file in await downloader.DownloadAsync(selection, parseResult.GetValue(folder)!.FullName, progress, cancellationToken))
+                var result = await downloader.DownloadAsync(selection, parseResult.GetValue(folder)!.FullName, progress, cancellationToken);
+                foreach (var file in result.Files)
                 {
                     progress.Log($"{(file.AlreadyPresent ? "Already have" : "Downloaded")} {file.Path}");
+                }
+
+                foreach (var removed in result.Removed)
+                {
+                    progress.Log($"Removed superseded {removed}");
                 }
 
                 return ExitCodes.Success;
