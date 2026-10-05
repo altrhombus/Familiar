@@ -167,11 +167,21 @@ public sealed class BuildRunner(ReleaseCatalog? catalog = null, UpdateDownloader
                 warnings.AddRange(plan.Warnings);
 
                 log($"Adding {plan.Actions.Count} updates");
+                var scratch = Path.Combine(work, "scratch");
                 foreach (var action in plan.Actions)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     log($"  {action.Description}");
-                    await image.ApplyAsync(action, progress, cancellationToken).ConfigureAwait(false);
+
+                    if (action is AddPackageAction { PackagePath: var package } && package.EndsWith(".msu", StringComparison.OrdinalIgnoreCase))
+                    {
+                        await Run(image.RunExternalAsync(mount =>
+                            _dism.AddPackageAsync(mount, package, scratch, action.Description, progress, cancellationToken))).ConfigureAwait(false);
+                    }
+                    else
+                    {
+                        await image.ApplyAsync(action, progress, cancellationToken).ConfigureAwait(false);
+                    }
                 }
             }
 

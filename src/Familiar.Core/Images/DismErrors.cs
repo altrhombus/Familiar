@@ -22,6 +22,7 @@ public static class DismErrors
         [0x800F0902] = "DISM is busy with another operation. Wait for it to finish, or close other servicing tools.",
         [0x800F082F] = "The image has pending operations that must be resolved first.",
         [0x800F0952] = "The image has a pending reboot operation from a previous servicing run.",
+        [0x800401E3] = "DISM's servicing session for the image was unavailable, usually because another session held it.",
         [0x80070005] = "Access denied. Run from an elevated prompt and check nothing else has the files open.",
         [0x80070070] = "Not enough disk space.",
     };

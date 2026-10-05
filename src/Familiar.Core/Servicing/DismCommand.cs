@@ -38,6 +38,17 @@ public sealed partial class DismCommand(string? dismPath = null)
     public Task<DismCommandResult> CleanupComponentsAsync(string mountPath, bool resetBase, IProgress<ServicingProgress>? progress = null, CancellationToken cancellationToken = default) =>
         RunAsync("Clean up components", ["/Image:" + mountPath, "/Cleanup-Image", "/StartComponentCleanup", .. resetBase ? ["/ResetBase"] : Array.Empty<string>()], progress, cancellationToken);
 
+    /// <summary>
+    /// Adds a package with dism.exe. Used for .msu updates: since 24H2 they install through an update agent in a
+    /// separate process that needs the image's servicing session to itself, which fails (0x800401E3) while a
+    /// DISM API session is open. <paramref name="scratchPath"/> keeps the expanded update out of the image.
+    /// </summary>
+    public Task<DismCommandResult> AddPackageAsync(string mountPath, string packagePath, string scratchPath, string operation, IProgress<ServicingProgress>? progress = null, CancellationToken cancellationToken = default)
+    {
+        Directory.CreateDirectory(scratchPath);
+        return RunAsync(operation, ["/Image:" + mountPath, "/Add-Package", "/PackagePath:" + packagePath, "/ScratchDir:" + scratchPath], progress, cancellationToken);
+    }
+
     /// <summary>Copies one index into another WIM, recompressing it. Also converts ESD sources to WIM.</summary>
     public Task<DismCommandResult> ExportImageAsync(string sourceImage, int sourceIndex, string destinationImage, string? destinationName = null, IProgress<ServicingProgress>? progress = null, CancellationToken cancellationToken = default)
     {
