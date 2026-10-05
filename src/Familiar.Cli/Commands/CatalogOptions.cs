@@ -34,7 +34,7 @@ internal static class CatalogOptions
         }
 
         var collected = result.Catalog.CollectedAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture) ?? "unknown";
-        Console.Error.WriteLine($"Release data: {result.Origin.ToString().ToLowerInvariant()}, collected {collected}");
+        Console.Error.WriteLine($"Release data: {result.Origin.ToString().ToLowerInvariant()}, updates collected {collected}");
         return result.Catalog;
     }
 }
