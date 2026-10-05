@@ -59,6 +59,25 @@ public static class RecipeValidator
             }
         }
 
+        if (recipe.ConfigMgr is { } configMgr)
+        {
+            if (configMgr.PackageId is null && configMgr.PackageSourcePath is null)
+            {
+                errors.Add("configMgr needs packageId (to update an existing package) or packageSourcePath (to create one).");
+            }
+
+            if (configMgr.PackageId is { } id && !System.Text.RegularExpressions.Regex.IsMatch(id, "^[A-Za-z0-9]{3}[0-9A-Fa-f]{5}$"))
+            {
+                errors.Add($"configMgr.packageId '{id}' is not a PackageID (for example PS100123).");
+            }
+
+            // The site server reads the package source, so it must be a share, not a path on this machine.
+            if (configMgr.PackageSourcePath is { } source && !source.StartsWith(@"\\", StringComparison.Ordinal))
+            {
+                errors.Add($"configMgr.packageSourcePath must be a UNC path (\\\\server\\share\\...), not {source}.");
+            }
+        }
+
         if (checkFiles && recipe.InboxApps is { } inboxApps && !Directory.Exists(inboxApps.MediaPath))
         {
             errors.Add($"Inbox apps media not found: {inboxApps.MediaPath}");

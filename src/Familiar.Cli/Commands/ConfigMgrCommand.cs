@@ -1,0 +1,122 @@
+using System.CommandLine;
+using Familiar.Core.ConfigMgr;
+using Familiar.Core.Recipes;
+
+namespace Familiar.Cli.Commands;
+
+internal static class ConfigMgrCommand
+{
+    public static Command Create() => new("configmgr", "Configuration Manager: check a site and publish images.")
+    {
+        CreateInfo(),
+        CreatePublish(),
+    };
+
+    private static Command CreateInfo()
+    {
+        var siteServer = new Option<string>("--site-server") { Description = "FQDN of the SMS Provider.", Required = true };
+        var siteCode = new Option<string?>("--site-code") { Description = "Site code (discovered when omitted)." };
+        var transport = new Option<ConfigMgrTransport>("--transport") { Description = "Auto, AdminService or Wmi.", DefaultValueFactory = _ => ConfigMgrTransport.Auto };
+
+        var command = new Command("info", "Connect to a site and list OS image packages and distribution point groups.")
+        {
+            siteServer,
+            siteCode,
+            transport,
+        };
+
+        command.SetAction(async (parseResult, cancellationToken) =>
+        {
+            try
+            {
+                await using var connection = await ConfigMgrConnector.ConnectAsync(
+                    parseResult.GetValue(siteServer)!, parseResult.GetValue(siteCode), parseResult.GetValue(transport), Console.Error.WriteLine, cancellationToken);
+
+                Console.WriteLine($"Site {connection.SiteCode} via {connection.Transport}");
+                Console.WriteLine();
+                Console.WriteLine("OS image packages:");
+                foreach (var package in (await connection.GetImagePackagesAsync(cancellationToken)).OrderBy(p => p.Name, StringComparer.OrdinalIgnoreCase))
+                {
+                    Console.WriteLine($"  {package.PackageId}  {package.Name} {package.Version}  [{package.ImageOSVersion}]  {package.SourcePath}");
+                }
+
+                Console.WriteLine();
+                Console.WriteLine("Distribution point groups:");
+                foreach (var group in (await connection.GetDistributionPointGroupsAsync(cancellationToken)).OrderBy(g => g.Name, StringComparer.OrdinalIgnoreCase))
+                {
+                    Console.WriteLine($"  {group.Name} ({group.MemberCount} members)");
+                }
+
+                Console.WriteLine();
+                Console.WriteLine("Distribution points:");
+                foreach (var point in (await connection.GetDistributionPointsAsync(cancellationToken)).OrderBy(p => p.ServerName, StringComparer.OrdinalIgnoreCase))
+                {
+                    Console.WriteLine($"  {point.ServerName} ({point.SiteCode})");
+                }
+
+                return ExitCodes.Success;
+            }
+            catch (ConfigMgrException ex)
+            {
+                Console.Error.WriteLine($"error: {ex.Message}");
+                return ExitCodes.Failure;
+            }
+        });
+
+        return command;
+    }
+
+    private static Command CreatePublish()
+    {
+        var recipePath = new Argument<FileInfo>("recipe") { Description = "Recipe whose output and configMgr section to use." };
+        var wim = new Option<FileInfo?>("--wim") { Description = "Publish this WIM instead of the recipe's output.path." };
+
+        var command = new Command("publish", "Publish an already-built image to Configuration Manager.") { recipePath, wim };
+
+        command.SetAction(async (parseResult, cancellationToken) =>
+        {
+            var recipe = await RecipeCommand.LoadAsync(parseResult.GetValue(recipePath)!, cancellationToken);
+            if (recipe is null)
+            {
+                return ExitCodes.Invalid;
+            }
+
+            if (recipe.ConfigMgr is not { } section)
+            {
+                Console.Error.WriteLine("The recipe has no configMgr section.");
+                return ExitCodes.Invalid;
+            }
+
+            var problems = RecipeValidator.Validate(recipe, checkFiles: false).Where(e => e.StartsWith("configMgr", StringComparison.Ordinal)).ToList();
+            foreach (var problem in problems)
+            {
+                Console.Error.WriteLine($"error: {problem}");
+            }
+
+            if (problems.Count > 0)
+            {
+                return ExitCodes.Invalid;
+            }
+
+            var progress = new ConsoleProgress();
+            try
+            {
+                var path = parseResult.GetValue(wim)?.FullName ?? recipe.Output.Path;
+                var warnings = await BuildRunner.PublishAsync(recipe, section, path, connect: null, progress, progress.Log, cancellationToken);
+                foreach (var warning in warnings)
+                {
+                    progress.Log($"warning: {warning}");
+                }
+
+                return ExitCodes.Success;
+            }
+            catch (BuildException ex)
+            {
+                progress.Log($"error: {ex.Message}");
+                return ExitCodes.Failure;
+            }
+        });
+
+        return command;
+    }
+}

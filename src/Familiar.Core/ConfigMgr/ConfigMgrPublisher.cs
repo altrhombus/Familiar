@@ -1,0 +1,197 @@
+using Familiar.Core.Servicing;
+
+namespace Familiar.Core.ConfigMgr;
+
+/// <summary>What to publish and where. Mirrors the recipe's <c>configMgr</c> section.</summary>
+public sealed record ConfigMgrPublishRequest
+{
+    /// <summary>Update this existing OS image package. When null, a new package is created.</summary>
+    public string? PackageId { get; init; }
+
+    /// <summary>UNC folder for the package source. Required for new packages; for existing ones, overrides nothing.</summary>
+    public string? PackageSourcePath { get; init; }
+
+    public required string Name { get; init; }
+
+    public string? Version { get; init; }
+
+    public string? Description { get; init; }
+
+    public IReadOnlyList<string> DistributionPointGroups { get; init; } = [];
+
+    public IReadOnlyList<string> DistributionPoints { get; init; } = [];
+}
+
+public sealed record ConfigMgrPublishResult(string PackageId, bool Created, IReadOnlyList<string> Warnings);
+
+/// <summary>
+/// Puts a built WIM into Configuration Manager: copy to the package source, create or update the OS image
+/// package, reload its image properties, then distribute (new packages) or refresh distribution points
+/// (existing packages).
+/// </summary>
+public sealed class ConfigMgrPublisher(IConfigMgrConnection connection)
+{
+    public async Task<ConfigMgrPublishResult> PublishAsync(
+        string wimPath,
+        ConfigMgrPublishRequest request,
+        IProgress<ServicingProgress>? progress = null,
+        Action<string>? log = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        log ??= _ => { };
+        var warnings = new List<string>();
+
+        if (!File.Exists(wimPath))
+        {
+            throw new ConfigMgrException($"Nothing to publish: {wimPath} does not exist.");
+        }
+
+        // Resolve distribution targets first, so a typo fails before anything is copied or created.
+        var groups = await ResolveGroupsAsync(request.DistributionPointGroups, cancellationToken).ConfigureAwait(false);
+        var points = await ResolvePointsAsync(request.DistributionPoints, cancellationToken).ConfigureAwait(false);
+
+        string packageId;
+        bool created;
+        if (request.PackageId is { } existingId)
+        {
+            var package = await connection.GetImagePackageAsync(existingId, cancellationToken).ConfigureAwait(false)
+                ?? throw new ConfigMgrException($"OS image package {existingId} was not found on site {connection.SiteCode}.");
+            if (string.IsNullOrWhiteSpace(package.SourcePath))
+            {
+                throw new ConfigMgrException($"OS image package {existingId} has no source path.");
+            }
+
+            log($"Updating OS image package {package.PackageId} ({package.Name}); source {package.SourcePath}");
+            await CopyAsync(wimPath, package.SourcePath, progress, cancellationToken).ConfigureAwait(false);
+
+            if (request.Version is not null || request.Description is not null)
+            {
+                try
+                {
+                    await connection.UpdateImagePackageAsync(package.PackageId, request.Version, request.Description, cancellationToken).ConfigureAwait(false);
+                }
+                catch (ConfigMgrException ex)
+                {
+                    warnings.Add($"Version and description were not updated: {ex.Message}");
+                }
+            }
+
+            packageId = package.PackageId;
+            created = false;
+        }
+        else
+        {
+            var folder = request.PackageSourcePath
+                ?? throw new ConfigMgrException("configMgr.packageSourcePath is required to create a new OS image package.");
+            var target = Path.Combine(folder, Path.GetFileName(wimPath));
+
+            log($"Copying image to {target}");
+            await CopyAsync(wimPath, target, progress, cancellationToken).ConfigureAwait(false);
+
+            log($"Creating OS image package \"{request.Name}\"");
+            packageId = await connection.CreateImagePackageAsync(request.Name, request.Version, request.Description, target, cancellationToken).ConfigureAwait(false);
+            created = true;
+        }
+
+        log($"Reloading image properties for {packageId}");
+        await connection.ReloadImagePropertiesAsync(packageId, cancellationToken).ConfigureAwait(false);
+
+        if (!created)
+        {
+            log("Refreshing distribution points that already have the package");
+            await connection.RefreshDistributionPointsAsync(packageId, cancellationToken).ConfigureAwait(false);
+        }
+
+        var targeted = created ? [] : await connection.GetPackageTargetsAsync(packageId, cancellationToken).ConfigureAwait(false);
+
+        foreach (var group in groups)
+        {
+            log($"Distributing to group {group.Name}");
+            try
+            {
+                await connection.DistributeToGroupAsync(packageId, group.GroupId, cancellationToken).ConfigureAwait(false);
+            }
+            catch (ConfigMgrException ex) when (!created)
+            {
+                // Usually means the package is already in the group; the refresh above covers it.
+                warnings.Add($"Group {group.Name}: {ex.Message}");
+            }
+        }
+
+        foreach (var point in points.Where(p => !targeted.Contains(p.NalPath, StringComparer.OrdinalIgnoreCase)))
+        {
+            log($"Distributing to {point.ServerName}");
+            await connection.DistributeToPointAsync(packageId, point, cancellationToken).ConfigureAwait(false);
+        }
+
+        if (created && groups.Count == 0 && points.Count == 0)
+        {
+            warnings.Add($"{packageId} was created but not distributed; add distributionPointGroups or distributionPoints, or distribute it in the console.");
+        }
+
+        log($"Published {packageId} on site {connection.SiteCode} via {connection.Transport}");
+        return new ConfigMgrPublishResult(packageId, created, warnings);
+    }
+
+    private async Task<IReadOnlyList<DistributionPointGroup>> ResolveGroupsAsync(IReadOnlyList<string> names, CancellationToken cancellationToken)
+    {
+        if (names.Count == 0)
+        {
+            return [];
+        }
+
+        var all = await connection.GetDistributionPointGroupsAsync(cancellationToken).ConfigureAwait(false);
+        return names.Select(name => all.FirstOrDefault(g => string.Equals(g.Name, name, StringComparison.OrdinalIgnoreCase))
+                ?? throw new ConfigMgrException($"Distribution point group \"{name}\" not found. Groups: {string.Join(", ", all.Select(g => g.Name))}"))
+            .ToList();
+    }
+
+    private async Task<IReadOnlyList<DistributionPoint>> ResolvePointsAsync(IReadOnlyList<string> names, CancellationToken cancellationToken)
+    {
+        if (names.Count == 0)
+        {
+            return [];
+        }
+
+        // Accept FQDNs or short names: "dp01" matches "dp01.contoso.com".
+        var all = await connection.GetDistributionPointsAsync(cancellationToken).ConfigureAwait(false);
+        return names.Select(name => all.FirstOrDefault(p =>
+                    string.Equals(p.ServerName, name, StringComparison.OrdinalIgnoreCase)
+                    || p.ServerName.StartsWith(name + ".", StringComparison.OrdinalIgnoreCase))
+                ?? throw new ConfigMgrException($"Distribution point \"{name}\" not found."))
+            .ToList();
+    }
+
+    /// <summary>Copies to a temporary name and renames, so a failed copy never replaces a working package source.</summary>
+    private static async Task CopyAsync(string source, string destination, IProgress<ServicingProgress>? progress, CancellationToken cancellationToken)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+        var partial = destination + ".familiar-partial";
+        var operation = $"Copy to {destination}";
+
+        try
+        {
+            await using (var input = new FileStream(source, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 20, useAsync: true))
+            await using (var output = new FileStream(partial, FileMode.Create, FileAccess.Write, FileShare.None, 1 << 20, useAsync: true))
+            {
+                var buffer = new byte[4 << 20];
+                long copied = 0;
+                int read;
+                while ((read = await input.ReadAsync(buffer, cancellationToken).ConfigureAwait(false)) > 0)
+                {
+                    await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
+                    copied += read;
+                    progress?.Report(new ServicingProgress(operation, 100.0 * copied / input.Length));
+                }
+            }
+
+            File.Move(partial, destination, overwrite: true);
+        }
+        catch
+        {
+            File.Delete(partial);
+            throw;
+        }
+    }
+}

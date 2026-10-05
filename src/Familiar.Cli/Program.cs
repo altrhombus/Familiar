@@ -11,6 +11,7 @@ var rootCommand = new RootCommand("Familiar: offline Windows image servicing.")
     CleanupCommand.Create(),
     UpdatesCommand.Create(),
     InboxAppsCommand.Create(),
+    ConfigMgrCommand.Create(),
 };
 
 return await rootCommand.Parse(args).InvokeAsync();

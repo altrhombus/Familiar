@@ -9,6 +9,7 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.Dism" />
     <PackageReference Include="System.Diagnostics.EventLog" />
+    <PackageReference Include="Microsoft.Management.Infrastructure" />
   </ItemGroup>
 
   <ItemGroup>

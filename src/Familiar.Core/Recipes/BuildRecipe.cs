@@ -30,6 +30,39 @@ public sealed record BuildRecipe
     public UpdatesSection? Updates { get; init; }
 
     public required OutputSection Output { get; init; }
+
+    /// <summary>Publish the output to Configuration Manager as an OS image package after the build.</summary>
+    public ConfigMgrSection? ConfigMgr { get; init; }
+}
+
+public sealed record ConfigMgrSection
+{
+    /// <summary>FQDN of the server hosting the SMS Provider (and the administration service).</summary>
+    public required string SiteServer { get; init; }
+
+    /// <summary>Usually discovered from the provider; set it in hierarchies with more than one site.</summary>
+    public string? SiteCode { get; init; }
+
+    public ConfigMgr.ConfigMgrTransport Transport { get; set; } = ConfigMgr.ConfigMgrTransport.Auto;
+
+    /// <summary>Existing OS image package to update. Omit to create a new one.</summary>
+    public string? PackageId { get; init; }
+
+    /// <summary>UNC folder the WIM is copied to for a new package, e.g. \\cm01\Sources$\OSD\Win11-25H2.</summary>
+    public string? PackageSourcePath { get; init; }
+
+    /// <summary>Package name for new packages; defaults to the recipe name.</summary>
+    public string? PackageName { get; init; }
+
+    /// <summary>Defaults to the build date (yyyy.MM.dd).</summary>
+    public string? Version { get; init; }
+
+    public string? Description { get; init; }
+
+    public IReadOnlyList<string> DistributionPointGroups { get; set; } = [];
+
+    /// <summary>Distribution point server names (FQDN or short name).</summary>
+    public IReadOnlyList<string> DistributionPoints { get; set; } = [];
 }
 
 public sealed record SourceSection

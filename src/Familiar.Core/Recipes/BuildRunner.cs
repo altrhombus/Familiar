@@ -1,4 +1,5 @@
 using System.Globalization;
+using Familiar.Core.ConfigMgr;
 using Familiar.Core.InboxApps;
 using Familiar.Core.Languages;
 using Familiar.Core.Releases;
@@ -19,7 +20,12 @@ public sealed record BuildResult(string OutputPath, IReadOnlyList<string> Warnin
 /// </summary>
 /// <param name="catalog">Release data, used to order updates and spot missing ones. Builds still run without it.</param>
 /// <param name="downloader">Needed only for recipes that download updates.</param>
-public sealed class BuildRunner(ReleaseCatalog? catalog = null, UpdateDownloader? downloader = null, DismCommand? dismCommand = null)
+/// <param name="connectConfigMgr">Replaces the Configuration Manager connection (tests); defaults to <see cref="ConfigMgrConnector"/>.</param>
+public sealed class BuildRunner(
+    ReleaseCatalog? catalog = null,
+    UpdateDownloader? downloader = null,
+    DismCommand? dismCommand = null,
+    Func<ConfigMgrSection, Action<string>, CancellationToken, Task<IConfigMgrConnection>>? connectConfigMgr = null)
 {
     private readonly DismCommand _dism = dismCommand ?? new DismCommand();
 
@@ -92,7 +98,52 @@ public sealed class BuildRunner(ReleaseCatalog? catalog = null, UpdateDownloader
         }
 
         log($"Done: {recipe.Output.Path}");
+
+        if (recipe.ConfigMgr is { } configMgr)
+        {
+            warnings.AddRange(await PublishAsync(recipe, configMgr, recipe.Output.Path, connectConfigMgr, progress, log, cancellationToken).ConfigureAwait(false));
+        }
+
         return new BuildResult(recipe.Output.Path, warnings);
+    }
+
+    /// <summary>Publishes a built WIM to Configuration Manager as described by the recipe.</summary>
+    public static async Task<IReadOnlyList<string>> PublishAsync(
+        BuildRecipe recipe,
+        ConfigMgrSection section,
+        string wimPath,
+        Func<ConfigMgrSection, Action<string>, CancellationToken, Task<IConfigMgrConnection>>? connect,
+        IProgress<ServicingProgress>? progress,
+        Action<string> log,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(recipe);
+        ArgumentNullException.ThrowIfNull(section);
+        connect ??= (s, l, ct) => ConfigMgrConnector.ConnectAsync(s.SiteServer, s.SiteCode, s.Transport, l, ct);
+
+        try
+        {
+            await using var connection = await connect(section, log, cancellationToken).ConfigureAwait(false);
+            var request = new ConfigMgrPublishRequest
+            {
+                PackageId = section.PackageId,
+                PackageSourcePath = section.PackageSourcePath,
+                Name = section.PackageName ?? recipe.Name ?? Path.GetFileNameWithoutExtension(wimPath),
+                Version = section.Version ?? DateTime.Now.ToString("yyyy.MM.dd", CultureInfo.InvariantCulture),
+                Description = section.Description,
+                DistributionPointGroups = section.DistributionPointGroups,
+                DistributionPoints = section.DistributionPoints,
+            };
+
+            var result = await new ConfigMgrPublisher(connection).PublishAsync(wimPath, request, progress, log, cancellationToken).ConfigureAwait(false);
+            return result.Warnings;
+        }
+        catch (Exception ex) when (ex is ConfigMgrException or IOException or UnauthorizedAccessException)
+        {
+            // The image itself is built; say so, so nobody rebuilds just to retry publishing.
+            throw new BuildException($"The image was built ({wimPath}) but publishing to Configuration Manager failed: {ex.Message}"
+                + $"{Environment.NewLine}Retry with 'familiar configmgr publish <recipe>'.");
+        }
     }
 
     private async Task BuildAsync(

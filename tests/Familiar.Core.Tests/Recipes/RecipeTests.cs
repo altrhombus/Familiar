@@ -134,6 +134,46 @@ public class RecipeTests
         }
     }
 
+    [Theory]
+    [InlineData(null, null, "packageId")]
+    [InlineData("PS1' or '1", null, "is not a PackageID")]
+    [InlineData(null, @"D:\Sources\OSD", "UNC")]
+    [InlineData("PS100123", null, null)]
+    [InlineData(null, @"\\cm01\Sources$\OSD", null)]
+    public void Validate_ConfigMgrSection(string? packageId, string? sourcePath, string? expected)
+    {
+        var recipe = RecipeSerializer.Template() with
+        {
+            ConfigMgr = new ConfigMgrSection { SiteServer = "cm01.contoso.com", PackageId = packageId, PackageSourcePath = sourcePath },
+        };
+
+        var errors = RecipeValidator.Validate(recipe, checkFiles: false);
+
+        if (expected is null)
+        {
+            Assert.Empty(errors);
+        }
+        else
+        {
+            Assert.Contains(errors, e => e.Contains(expected, StringComparison.Ordinal));
+        }
+    }
+
+    [Fact]
+    public void Parse_ConfigMgrSection_ReadsTransportAndTargets()
+    {
+        var json = Minimal.Replace("\"output\":", """
+            "configMgr": { "siteServer": "cm01.contoso.com", "transport": "Wmi", "packageId": "PS100123", "distributionPointGroups": [ "All DPs" ] },
+            "output":
+            """, StringComparison.Ordinal);
+
+        var recipe = RecipeSerializer.Parse(json, @"C:\Recipes");
+
+        Assert.Equal(Familiar.Core.ConfigMgr.ConfigMgrTransport.Wmi, recipe.ConfigMgr!.Transport);
+        Assert.Equal(["All DPs"], recipe.ConfigMgr.DistributionPointGroups);
+        Assert.Empty(recipe.ConfigMgr.DistributionPoints);
+    }
+
     [Fact]
     public void Validate_RejectsFutureSchema()
     {
