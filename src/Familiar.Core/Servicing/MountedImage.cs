@@ -61,6 +61,11 @@ public sealed class MountedImage : IAsyncDisposable
             .OfType<PackageIdentity>()
             .ToList();
 
+    public IReadOnlyList<InboxApps.ProvisionedApp> GetProvisionedApps() =>
+        DismApi.GetProvisionedAppxPackages(Session)
+            .Select(p => new InboxApps.ProvisionedApp(p.DisplayName, p.Version))
+            .ToList();
+
     /// <summary>Capability name to whether it is installed.</summary>
     public IReadOnlyDictionary<string, bool> GetCapabilities() =>
         DismApi.GetCapabilities(Session).ToDictionary(
@@ -115,6 +120,12 @@ public sealed class MountedImage : IAsyncDisposable
             case AddCapabilityAction capability:
                 await DismApi.AddCapabilityAsync(Session, capability.CapabilityName, limitAccess: true,
                     [capability.SourcePath], report, cancellationToken).ConfigureAwait(false);
+                break;
+
+            case InboxApps.AddProvisionedAppAction app:
+                // The DISM API has no async or progress overload for this; keep it off the caller's thread.
+                await Task.Run(() => DismApi.AddProvisionedAppxPackage(Session, app.PackagePath, [.. app.DependencyPaths], [],
+                    [app.LicensePath], customDataPath: null!, regions: "all", DismStubPackageOption.None), cancellationToken).ConfigureAwait(false);
                 break;
 
             default:

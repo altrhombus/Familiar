@@ -1,4 +1,5 @@
 using System.Globalization;
+using Familiar.Core.InboxApps;
 using Familiar.Core.Languages;
 using Familiar.Core.Releases;
 using Familiar.Core.Servicing;
@@ -167,6 +168,21 @@ public sealed class BuildRunner(ReleaseCatalog? catalog = null, UpdateDownloader
                 {
                     log($"Setting default language to {defaultLanguage}");
                     await Run(image.RunExternalAsync(mount => _dism.SetAllInternationalAsync(mount, defaultLanguage, progress, cancellationToken))).ConfigureAwait(false);
+                }
+            }
+
+            // After languages, so bundles provision resource packages for the new languages.
+            if (recipe.InboxApps is { } inboxApps)
+            {
+                var plan = InboxAppPlanner.Plan(InboxAppMedia.Scan(inboxApps.MediaPath), image.GetProvisionedApps(), source.Architecture);
+                warnings.AddRange(plan.Warnings);
+
+                log($"Re-provisioning {plan.Actions.Count} inbox apps");
+                foreach (var action in plan.Actions)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    log($"  {action.Description}");
+                    await image.ApplyAsync(action, progress, cancellationToken).ConfigureAwait(false);
                 }
             }
 

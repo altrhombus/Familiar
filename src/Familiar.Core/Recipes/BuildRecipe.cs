@@ -25,6 +25,8 @@ public sealed record BuildRecipe
 
     public LanguagesSection? Languages { get; init; }
 
+    public InboxAppsSection? InboxApps { get; init; }
+
     public UpdatesSection? Updates { get; init; }
 
     public required OutputSection Output { get; init; }
@@ -55,6 +57,15 @@ public sealed record LanguagesSection
 
     /// <summary>Also localize Windows Recovery (WinRE) inside the image.</summary>
     public bool UpdateWinRE { get; set; } = true;
+}
+
+public sealed record InboxAppsSection
+{
+    /// <summary>
+    /// Inbox Apps ISO root (mounted) or its packages folder. Apps already in the image are re-provisioned from it
+    /// after languages are added, so they pick up resources for the new languages. Removed apps stay removed.
+    /// </summary>
+    public required string MediaPath { get; init; }
 }
 
 public sealed record UpdatesSection

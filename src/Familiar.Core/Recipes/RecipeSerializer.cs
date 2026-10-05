@@ -49,6 +49,7 @@ public static class RecipeSerializer
             Source = recipe.Source with { Path = Full(recipe.Source.Path) },
             WorkingDirectory = Full(recipe.WorkingDirectory),
             Languages = recipe.Languages is null ? null : recipe.Languages with { MediaPath = Full(recipe.Languages.MediaPath) },
+            InboxApps = recipe.InboxApps is null ? null : recipe.InboxApps with { MediaPath = Full(recipe.InboxApps.MediaPath) },
             Updates = recipe.Updates is null ? null : recipe.Updates with { Folder = Full(recipe.Updates.Folder) },
             Output = recipe.Output with { Path = Full(recipe.Output.Path) },
         };

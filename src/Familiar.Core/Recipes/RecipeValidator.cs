@@ -59,6 +59,11 @@ public static class RecipeValidator
             }
         }
 
+        if (checkFiles && recipe.InboxApps is { } inboxApps && !Directory.Exists(inboxApps.MediaPath))
+        {
+            errors.Add($"Inbox apps media not found: {inboxApps.MediaPath}");
+        }
+
         if (checkFiles && recipe.Updates is { Download: false } updates && !Directory.Exists(updates.Folder))
         {
             errors.Add($"Updates folder not found: {updates.Folder}");
