@@ -59,7 +59,7 @@ public static class RecipeValidator
             }
         }
 
-        if (checkFiles && recipe.Updates is { } updates && !Directory.Exists(updates.Folder))
+        if (checkFiles && recipe.Updates is { Download: false } updates && !Directory.Exists(updates.Folder))
         {
             errors.Add($"Updates folder not found: {updates.Folder}");
         }

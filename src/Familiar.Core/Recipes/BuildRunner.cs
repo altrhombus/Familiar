@@ -17,7 +17,8 @@ public sealed record BuildResult(string OutputPath, IReadOnlyList<string> Warnin
 /// working copy, serviced there, and exported again to the output path. Requires an initialized DISM API.
 /// </summary>
 /// <param name="catalog">Release data, used to order updates and spot missing ones. Builds still run without it.</param>
-public sealed class BuildRunner(ReleaseCatalog? catalog = null, DismCommand? dismCommand = null)
+/// <param name="downloader">Needed only for recipes that download updates.</param>
+public sealed class BuildRunner(ReleaseCatalog? catalog = null, UpdateDownloader? downloader = null, DismCommand? dismCommand = null)
 {
     private readonly DismCommand _dism = dismCommand ?? new DismCommand();
 
@@ -45,19 +46,23 @@ public sealed class BuildRunner(ReleaseCatalog? catalog = null, DismCommand? dis
         var media = recipe.Languages is null ? null : LanguageMedia.Scan(recipe.Languages.MediaPath);
         var mediaBuild = media is null ? null : await ReadMediaBuildAsync(media, cancellationToken).ConfigureAwait(false);
 
+        var info = DismApi.GetImageInfo(recipe.Source.Path).FirstOrDefault(i => i.ImageIndex == recipe.Source.Index)
+            ?? throw new BuildException($"Index {recipe.Source.Index} does not exist in {recipe.Source.Path}.");
+        var architecture = info.Architecture == DismProcessorArchitecture.ARM64 ? "arm64" : "x64";
+
+        // Download before mounting, so a long download never holds a mount open.
+        if (recipe.Updates is { Download: true } download)
+        {
+            await DownloadUpdatesAsync(download, info.ProductVersion.Build, info.InstallationType, architecture, progress, log, cancellationToken).ConfigureAwait(false);
+        }
+
         var updateFiles = recipe.Updates is null ? null : UpdatePlanner.Scan(recipe.Updates.Folder);
         if (updateFiles is { Count: 0 })
         {
             throw new BuildException($"No .msu or .cab files with a KB number were found in {recipe.Updates!.Folder}.");
         }
 
-        var info = DismApi.GetImageInfo(recipe.Source.Path).FirstOrDefault(i => i.ImageIndex == recipe.Source.Index)
-            ?? throw new BuildException($"Index {recipe.Source.Index} does not exist in {recipe.Source.Path}.");
-        var source = new SourceDetails(
-            info.ImageName,
-            info.InstallationType,
-            info.Architecture == DismProcessorArchitecture.ARM64 ? "arm64" : "x64",
-            updateFiles);
+        var source = new SourceDetails(info.ImageName, info.InstallationType, architecture, updateFiles);
 
         var work = Path.Combine(recipe.WorkingDirectory, DateTime.Now.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture));
         Directory.CreateDirectory(work);
@@ -183,6 +188,35 @@ public sealed class BuildRunner(ReleaseCatalog? catalog = null, DismCommand? dis
         // Exporting drops the space left behind by replaced files and stores the final name.
         Directory.CreateDirectory(Path.GetDirectoryName(recipe.Output.Path)!);
         await Run(_dism.ExportImageAsync(workImage, 1, recipe.Output.Path, recipe.Output.ImageName ?? source.Name, progress, cancellationToken)).ConfigureAwait(false);
+    }
+
+    private async Task DownloadUpdatesAsync(
+        UpdatesSection updates, int build, string installationType, string architecture,
+        IProgress<ServicingProgress>? progress, Action<string> log, CancellationToken cancellationToken)
+    {
+        if (catalog is null || downloader is null)
+        {
+            throw new BuildException("updates.download needs release data and network access; run without --offline.");
+        }
+
+        var release = catalog.Resolve(build, installationType)
+            ?? throw new BuildException($"Build {build} is not in the release data, so Familiar cannot tell which updates to download. Try --refresh.");
+
+        try
+        {
+            var selection = await downloader.SelectAsync(release, architecture, updates.IncludeDotNet, cancellationToken: cancellationToken).ConfigureAwait(false);
+            log($"Downloading updates for {release.Name} {architecture}: {selection.CumulativeUpdate.Title}"
+                + (selection.DotNet is { } dotNet ? $"; {dotNet.Title}" : string.Empty));
+
+            foreach (var file in await downloader.DownloadAsync(selection, updates.Folder, progress, cancellationToken).ConfigureAwait(false))
+            {
+                log($"  {Path.GetFileName(file.Path)}{(file.AlreadyPresent ? " (already downloaded)" : string.Empty)}");
+            }
+        }
+        catch (Exception ex) when (ex is HttpRequestException or InvalidOperationException or InvalidDataException or NotSupportedException)
+        {
+            throw new BuildException($"Downloading updates failed: {ex.Message}");
+        }
     }
 
     private sealed record SourceDetails(string Name, string InstallationType, string Architecture, IReadOnlyList<UpdateFile>? UpdateFiles);

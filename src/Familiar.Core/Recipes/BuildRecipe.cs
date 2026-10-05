@@ -64,6 +64,15 @@ public sealed record UpdatesSection
     /// Update Catalog lists for the cumulative update; checkpoint updates are applied first automatically.
     /// </summary>
     public required string Folder { get; init; }
+
+    /// <summary>
+    /// Before building, download the latest cumulative update (with its checkpoints) for the source image's
+    /// release from the Microsoft Update Catalog into <see cref="Folder"/>. Files already there are reused.
+    /// </summary>
+    public bool Download { get; set; }
+
+    /// <summary>When downloading, also fetch the latest .NET Framework cumulative update.</summary>
+    public bool IncludeDotNet { get; set; } = true;
 }
 
 public sealed record OutputSection

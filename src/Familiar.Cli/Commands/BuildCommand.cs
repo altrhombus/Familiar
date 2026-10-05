@@ -2,7 +2,7 @@ using System.CommandLine;
 using Familiar.Core;
 using Familiar.Core.Images;
 using Familiar.Core.Recipes;
-using Familiar.Core.Servicing;
+using Familiar.Core.Updates;
 
 namespace Familiar.Cli.Commands;
 
@@ -39,12 +39,14 @@ internal static class BuildCommand
             }
 
             var catalog = await CatalogOptions.LoadAsync(parseResult, cancellationToken);
+            using var http = Http.Create();
+            var downloader = parseResult.GetValue(CatalogOptions.Offline) ? null : new UpdateDownloader(http, catalog);
             var progress = new ConsoleProgress();
 
             try
             {
                 using var dism = new DismHost(parseResult.GetValue(logFile)?.FullName);
-                var result = await new BuildRunner(catalog).RunAsync(recipe, progress, progress.Log, cancellationToken);
+                var result = await new BuildRunner(catalog, downloader).RunAsync(recipe, progress, progress.Log, cancellationToken);
                 foreach (var warning in result.Warnings)
                 {
                     progress.Log($"warning: {warning}");
@@ -70,43 +72,5 @@ internal static class BuildCommand
         });
 
         return command;
-    }
-
-    /// <summary>Rewrites one status line per operation; log messages go above it.</summary>
-    private sealed class ConsoleProgress : IProgress<ServicingProgress>
-    {
-        private readonly Lock _gate = new();
-        private bool _onStatusLine;
-
-        public void Report(ServicingProgress value)
-        {
-            if (Console.IsOutputRedirected)
-            {
-                return;
-            }
-
-            lock (_gate)
-            {
-                var percent = value.Percent is { } p ? $" {p,5:0.0}%" : string.Empty;
-                var text = $"  {value.Operation}{percent}";
-                var width = Math.Max(1, Console.WindowWidth - 1);
-                Console.Write("\r" + (text.Length > width ? text[..width] : text.PadRight(width)));
-                _onStatusLine = true;
-            }
-        }
-
-        public void Log(string message)
-        {
-            lock (_gate)
-            {
-                if (_onStatusLine)
-                {
-                    Console.Write("\r" + new string(' ', Math.Max(1, Console.WindowWidth - 1)) + "\r");
-                    _onStatusLine = false;
-                }
-
-                Console.WriteLine($"{DateTime.Now:HH:mm:ss} {message}");
-            }
-        }
     }
 }
