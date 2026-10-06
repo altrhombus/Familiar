@@ -100,6 +100,17 @@ public class AdminServiceConnectionTests
     }
 
     [Fact]
+    public async Task AccessDenied_IsReportedAsPermissions_NotNotFound()
+    {
+        // What a site returns to an account without ConfigMgr rights: 404 with "Access denied" in the body.
+        var handler = new FakeHandler(_ => Json("""{"error":{"code":"404","message":"Access denied  WMI QUERY: "}}""", HttpStatusCode.NotFound));
+
+        var ex = await Assert.ThrowsAsync<ConfigMgrException>(() => Connect(handler));
+
+        Assert.Contains("lacks ConfigMgr permissions", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task MaliciousPackageId_NeverReachesTheUrl()
     {
         var handler = new FakeHandler(_ => Json("""{ "value": [ { "SiteCode": "PS1" } ] }"""));

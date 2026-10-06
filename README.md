@@ -63,10 +63,12 @@ longer maintained.
 8. ~~Update downloads from the Microsoft Update Catalog~~
 9. ISO creation (`oscdimg` from the ADK)
 10. Autopilot JSON drop-in
+11. Local Experience Packs (.appx languages): Windows 11 cannot image them (only .cab language packs and LIPs), so consider only if Microsoft documents a supported path
 
 ## Building
 
-Requires the .NET 10 SDK on Windows. Visual Studio 2026 is optional.
+Requires the .NET 10 SDK on Windows. Visual Studio 2026 is optional. To run Familiar on a build machine without
+.NET, publish the self-contained CLI with `./eng/Publish-Cli.ps1`; see [Setting up a build machine](docs/build-machine-setup.md).
 
 ```powershell
 dotnet build Familiar.slnx
@@ -87,6 +89,7 @@ familiar inbox-apps G:\                 # apps on an Inbox Apps ISO and their de
 familiar configmgr info --site-server cm01.contoso.com
 familiar configmgr publish my-build.json   # publish an existing build without rebuilding
 familiar info E:\sources\install.wim    # indexes, release, patch level, support (elevated)
+familiar doctor --recipe my-build.json  # check this machine (Defender, disk, network, ConfigMgr) before building
 familiar build my-build.json            # run the build (elevated)
 ```
 

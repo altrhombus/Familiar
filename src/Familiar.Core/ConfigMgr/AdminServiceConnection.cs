@@ -177,7 +177,10 @@ public sealed class AdminServiceConnection : IConfigMgrConnection
         }
 
         var detail = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-        var message = response.StatusCode switch
+        // The service reports permission failures as 404 "Access denied  WMI QUERY".
+        var message = detail.Contains("Access denied", StringComparison.OrdinalIgnoreCase)
+            ? "access denied; this account lacks ConfigMgr permissions"
+            : response.StatusCode switch
         {
             HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden => "access denied; check your ConfigMgr role permissions",
             HttpStatusCode.NotFound => "not found",
