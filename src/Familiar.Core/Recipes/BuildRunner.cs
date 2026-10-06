@@ -60,7 +60,7 @@ public sealed class BuildRunner(
         // Download before mounting, so a long download never holds a mount open.
         if (recipe.Updates is { Download: true } download)
         {
-            await DownloadUpdatesAsync(download, info.ProductVersion.Build, info.InstallationType, architecture, progress, log, cancellationToken).ConfigureAwait(false);
+            await DownloadUpdatesAsync(download, recipe.WinRE.Update, info.ProductVersion.Build, info.InstallationType, architecture, progress, log, cancellationToken).ConfigureAwait(false);
         }
 
         var updateFiles = recipe.Updates is null ? null : UpdatePlanner.Scan(recipe.Updates.Folder);
@@ -196,20 +196,32 @@ public sealed class BuildRunner(
                 log($"Image: {source.Name}, servicing baseline {baseline}");
             }
 
+            if (media is not null && mediaBuild is not null && baseline is not null && mediaBuild != baseline)
+            {
+                throw new BuildException(
+                    $"The language media is for build {mediaBuild}, but this image is serviced as build {baseline}. Use the Languages and Optional Features media for {baseline}.");
+            }
+
+            var build = version?.CurrentBuild ?? baseline;
+            var release = build is null ? null : catalog?.Resolve(build.Value, source.InstallationType, version?.DisplayVersion ?? version?.ReleaseId);
+
+            var safeOS = recipe.WinRE.Update && recipe.Updates is { } updatesSection
+                ? await FindSafeOSUpdateAsync(updatesSection.Folder, warnings, cancellationToken).ConfigureAwait(false)
+                : null;
+            if (recipe.WinRE.Update && recipe.Updates is not null && safeOS is null)
+            {
+                warnings.Add($"No Safe OS Dynamic Update in {Path.Combine(recipe.Updates.Folder, UpdatesSection.SafeOSFolderName)}, so WinRE was not patched. Set updates.download, or put the .cab there.");
+            }
+
+            var winREWork = new WinREWork(recipe.WinRE.ResolveLanguages(recipe.Languages), media, recipe.Languages?.DefaultLanguage, source.UpdateFiles, safeOS);
+            if (winREWork.HasWork)
+            {
+                warnings.AddRange(await ServiceWinREAsync(image, winREWork, release, source.Architecture, work, recipe.Output.CleanupComponents, progress, log, cancellationToken).ConfigureAwait(false));
+            }
+
             if (media is not null && recipe.Languages is { } languages)
             {
-                if (mediaBuild is not null && baseline is not null && mediaBuild != baseline)
-                {
-                    throw new BuildException(
-                        $"The language media is for build {mediaBuild}, but this image is serviced as build {baseline}. Use the Languages and Optional Features media for {baseline}.");
-                }
-
                 // Languages go in before cumulative updates, so the update also refreshes the new language resources.
-                if (languages.UpdateWinRE)
-                {
-                    warnings.AddRange(await LocalizeWinREAsync(image, languages, media, work, recipe.Output.CleanupComponents, progress, log, cancellationToken).ConfigureAwait(false));
-                }
-
                 var request = new LanguageRequest
                 {
                     Languages = languages.Languages,
@@ -259,8 +271,6 @@ public sealed class BuildRunner(
             // After languages, so the cumulative update also services the newly added language resources.
             if (source.UpdateFiles is { } files)
             {
-                var build = version?.CurrentBuild ?? baseline;
-                var release = build is null ? null : catalog?.Resolve(build.Value, source.InstallationType, version?.DisplayVersion ?? version?.ReleaseId);
                 var plan = UpdatePlanner.Plan(files, new UpdateTarget(release, source.Architecture, version?.UpdateBuildRevision), catalog);
                 warnings.AddRange(plan.Warnings);
 
@@ -299,7 +309,7 @@ public sealed class BuildRunner(
     }
 
     private async Task DownloadUpdatesAsync(
-        UpdatesSection updates, int build, string installationType, string architecture,
+        UpdatesSection updates, bool includeSafeOS, int build, string installationType, string architecture,
         IProgress<ServicingProgress>? progress, Action<string> log, CancellationToken cancellationToken)
     {
         if (catalog is null || downloader is null)
@@ -312,9 +322,10 @@ public sealed class BuildRunner(
 
         try
         {
-            var selection = await downloader.SelectAsync(release, architecture, updates.IncludeDotNet, cancellationToken: cancellationToken).ConfigureAwait(false);
+            var selection = await downloader.SelectAsync(release, architecture, updates.IncludeDotNet, includeSafeOS: includeSafeOS, cancellationToken: cancellationToken).ConfigureAwait(false);
             log($"Downloading updates for {release.Name} {architecture}: {selection.CumulativeUpdate.Title}"
-                + (selection.DotNet is { } dotNet ? $"; {dotNet.Title}" : string.Empty));
+                + (selection.DotNet is { } dotNet ? $"; {dotNet.Title}" : string.Empty)
+                + (selection.SafeOS is { } safeOS ? $"; {safeOS.Title}" : string.Empty));
 
             var result = await downloader.DownloadAsync(selection, updates.Folder, progress, cancellationToken).ConfigureAwait(false);
             foreach (var file in result.Files)
@@ -347,10 +358,15 @@ public sealed class BuildRunner(
         }
     }
 
-    private async Task<IReadOnlyList<string>> LocalizeWinREAsync(
+    /// <summary>
+    /// Patches and/or localizes WinRE in Microsoft's documented order: the cumulative update (for its servicing
+    /// stack), languages, the Safe OS Dynamic Update, cleanup, export.
+    /// </summary>
+    private async Task<IReadOnlyList<string>> ServiceWinREAsync(
         MountedImage image,
-        LanguagesSection languages,
-        LanguageMedia media,
+        WinREWork plan,
+        WindowsRelease? release,
+        string architecture,
         string work,
         bool cleanup,
         IProgress<ServicingProgress>? progress,
@@ -360,42 +376,86 @@ public sealed class BuildRunner(
         var winRE = Path.Combine(image.MountPath, "Windows", "System32", "Recovery", "Winre.wim");
         if (!File.Exists(winRE))
         {
-            return ["The image has no WinRE (Windows\\System32\\Recovery\\Winre.wim); recovery was not localized."];
+            return ["The image has no WinRE (Windows\\System32\\Recovery\\Winre.wim); recovery was not patched or localized."];
         }
 
         var workWinRE = Path.Combine(work, "winre.wim");
         File.Copy(winRE, workWinRE);
         File.SetAttributes(workWinRE, FileAttributes.Normal);
 
-        IReadOnlyList<string> warnings;
+        var original = DismApi.GetImageInfo(workWinRE)[0].ProductVersion;
+        log($"WinRE: build {original.Build}.{original.Revision}");
+
+        var warnings = new List<string>();
+        var changed = false;
         await using (var recovery = await MountedImage.MountAsync(workWinRE, 1, Path.Combine(work, "winre-mount"), progress, cancellationToken).ConfigureAwait(false))
         {
-            var plan = LanguagePlanner.PlanWinPE(languages.Languages, media, recovery.GetPackages().Select(p => p.ToString()).ToList());
-            warnings = plan.Warnings;
-            if (plan.Actions.Count == 0)
+            if (plan.SafeOS is not null && plan.Updates is { } updates)
+            {
+                var updatePlan = UpdatePlanner.Plan(updates, new UpdateTarget(release, architecture, original.Revision), catalog, cumulativeOnly: true);
+                log($"Updating WinRE's servicing stack ({updatePlan.Actions.Count} updates)");
+                var scratch = Path.Combine(work, "scratch");
+                foreach (var action in updatePlan.Actions.OfType<AddPackageAction>())
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    log($"  {action.Description}");
+                    var result = await recovery.RunExternalAsync(mount =>
+                        _dism.AddPackageAsync(mount, action.PackagePath, scratch, $"WinRE: {action.Description}", progress, cancellationToken)).ConfigureAwait(false);
+                    if (result.ExitCode == CombinedUpdateKnownIssue)
+                    {
+                        // Microsoft's media update guidance calls this a known issue with combined cumulative updates, safe to ignore.
+                        log("    0x8007007e: known issue with combined cumulative updates in WinRE; continuing");
+                    }
+                    else if (!result.Succeeded)
+                    {
+                        throw new BuildException($"dism.exe failed with exit code {result.ExitCode} adding {action.Description} to WinRE:{Environment.NewLine}{result.Output.Trim()}");
+                    }
+
+                    changed = true;
+                }
+            }
+
+            if (plan.Languages.Count > 0 && plan.Media is { } media)
+            {
+                var languagePlan = LanguagePlanner.PlanWinPE(plan.Languages, media, recovery.GetPackages().Select(p => p.ToString()).ToList());
+                warnings.AddRange(languagePlan.Warnings);
+
+                // One line per language: each brings a language pack plus a package per installed WinPE component.
+                log($"Localizing WinRE ({languagePlan.Actions.Count} packages)");
+                string? current = null;
+                foreach (var action in languagePlan.Actions)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var tag = action.Description[(action.Description.LastIndexOf(' ') + 1)..];
+                    if (tag != current)
+                    {
+                        current = tag;
+                        log($"  {tag}: {languagePlan.Actions.Count(a => a.Description.EndsWith(" " + tag, StringComparison.Ordinal))} packages");
+                    }
+
+                    await recovery.ApplyAsync(action, progress, cancellationToken).ConfigureAwait(false);
+                    changed = true;
+                }
+
+                if (plan.DefaultLanguage is { } defaultLanguage
+                    && plan.Languages.Contains(defaultLanguage, StringComparer.OrdinalIgnoreCase)
+                    && media.WinPE.ContainsKey(defaultLanguage))
+                {
+                    await Run(recovery.RunExternalAsync(mount => _dism.SetAllInternationalAsync(mount, defaultLanguage, progress, cancellationToken))).ConfigureAwait(false);
+                }
+            }
+
+            if (plan.SafeOS is { } safeOS)
+            {
+                log($"  Safe OS Dynamic Update {Path.GetFileName(safeOS)}");
+                await recovery.ApplyAsync(new AddPackageAction(safeOS, "Safe OS Dynamic Update"), progress, cancellationToken).ConfigureAwait(false);
+                changed = true;
+            }
+
+            if (!changed)
             {
                 await recovery.DiscardAsync(progress, cancellationToken).ConfigureAwait(false);
                 return warnings;
-            }
-
-            // One line per language: each brings a language pack plus a package per installed WinPE component.
-            log($"Localizing WinRE ({plan.Actions.Count} packages)");
-            string? current = null;
-            foreach (var action in plan.Actions)
-            {
-                var tag = action.Description[(action.Description.LastIndexOf(' ') + 1)..];
-                if (tag != current)
-                {
-                    current = tag;
-                    log($"  {tag}: {plan.Actions.Count(a => a.Description.EndsWith(" " + tag, StringComparison.Ordinal))} packages");
-                }
-
-                await recovery.ApplyAsync(action, progress, cancellationToken).ConfigureAwait(false);
-            }
-
-            if (languages.DefaultLanguage is { } defaultLanguage && media.WinPE.ContainsKey(defaultLanguage))
-            {
-                await Run(recovery.RunExternalAsync(mount => _dism.SetAllInternationalAsync(mount, defaultLanguage, progress, cancellationToken))).ConfigureAwait(false);
             }
 
             if (cleanup)
@@ -410,13 +470,19 @@ public sealed class BuildRunner(
         var compacted = Path.Combine(work, "winre-final.wim");
         await Run(_dism.ExportImageAsync(workWinRE, 1, compacted, progress: progress, cancellationToken: cancellationToken)).ConfigureAwait(false);
 
+        var serviced = DismApi.GetImageInfo(compacted)[0].ProductVersion;
         var before = new FileInfo(winRE).Length;
         var after = new FileInfo(compacted).Length;
-        log($"WinRE: {Megabytes(before)} MB before, {Megabytes(after)} MB after localizing");
-        if (after > before)
+        log($"WinRE: build {original.Build}.{original.Revision} -> {serviced.Build}.{serviced.Revision}, {Megabytes(before)} MB -> {Megabytes(after)} MB");
+        if (plan.SafeOS is not null && serviced.Revision <= original.Revision)
+        {
+            warnings.Add($"WinRE is still at build {serviced.Build}.{serviced.Revision} after the Safe OS Dynamic Update; the update may be older than the WinRE already in the image.");
+        }
+
+        if (plan.Languages.Count > 0 && after > before)
         {
             // Deployed devices keep WinRE on the recovery partition; if it doesn't fit, Windows disables recovery.
-            warnings = [.. warnings, $"Localizing grew WinRE from {Megabytes(before)} MB to {Megabytes(after)} MB. Make sure the recovery partition your deployment creates has room for it."];
+            warnings.Add($"Localizing grew WinRE from {Megabytes(before)} MB to {Megabytes(after)} MB. Make sure the recovery partition your deployment creates has room for it.");
         }
 
         var attributes = File.GetAttributes(winRE);
@@ -424,6 +490,46 @@ public sealed class BuildRunner(
         File.Copy(compacted, winRE, overwrite: true);
         File.SetAttributes(winRE, attributes);
         return warnings;
+    }
+
+    // 0x8007007E as dism.exe's exit code.
+    private const int CombinedUpdateKnownIssue = unchecked((int)0x8007007E);
+
+    /// <summary>What a build does to WinRE.</summary>
+    /// <param name="Updates">Cumulative updates for WinRE's servicing stack; applied only along with <paramref name="SafeOS"/>.</param>
+    /// <param name="SafeOS">The Safe OS Dynamic Update .cab, or null to leave WinRE unpatched.</param>
+    private sealed record WinREWork(
+        IReadOnlyList<string> Languages,
+        LanguageMedia? Media,
+        string? DefaultLanguage,
+        IReadOnlyList<UpdateFile>? Updates,
+        string? SafeOS)
+    {
+        public bool HasWork => SafeOS is not null || (Languages.Count > 0 && Media is not null);
+    }
+
+    /// <summary>The newest Safe OS Dynamic Update in the updates folder's SafeOS subfolder, by package version.</summary>
+    private static async Task<string?> FindSafeOSUpdateAsync(string updatesFolder, List<string> warnings, CancellationToken cancellationToken)
+    {
+        var folder = Path.Combine(updatesFolder, UpdatesSection.SafeOSFolderName);
+        if (!Directory.Exists(folder))
+        {
+            return null;
+        }
+
+        var candidates = new List<(string Path, Version? Version)>();
+        foreach (var cab in Directory.EnumerateFiles(folder, "*.cab"))
+        {
+            var identity = await CabManifest.ReadIdentityAsync(cab, cancellationToken).ConfigureAwait(false);
+            candidates.Add((cab, identity?.Version));
+        }
+
+        if (candidates.Count > 1)
+        {
+            warnings.Add($"{folder} has {candidates.Count} Safe OS updates; using the newest. Keep only one there.");
+        }
+
+        return candidates.OrderByDescending(c => c.Version).Select(c => c.Path).FirstOrDefault();
     }
 
     private static long Megabytes(long bytes) => (bytes + (1 << 20) - 1) >> 20;

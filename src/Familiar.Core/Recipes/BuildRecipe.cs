@@ -29,6 +29,9 @@ public sealed record BuildRecipe
 
     public UpdatesSection? Updates { get; init; }
 
+    /// <summary>Windows Recovery inside the image: patched by default, localized only on request.</summary>
+    public WinRESection WinRE { get; set; } = new();
+
     public required OutputSection Output { get; init; }
 
     /// <summary>Publish the output to Configuration Manager as an OS image package after the build.</summary>
@@ -114,9 +117,31 @@ public sealed record LanguagesSection
 
     /// <summary>UI language, locale and input defaults. Must be one of <see cref="Languages"/>.</summary>
     public string? DefaultLanguage { get; init; }
+}
 
-    /// <summary>Also localize Windows Recovery (WinRE) inside the image.</summary>
-    public bool UpdateWinRE { get; set; } = true;
+public sealed record WinRESection
+{
+    /// <summary>Recipe value for <see cref="Languages"/> meaning every language in the languages section.</summary>
+    public const string ImageLanguages = "image";
+
+    /// <summary>
+    /// Patch WinRE when the recipe has updates: the cumulative update for its servicing stack, then the Safe OS
+    /// Dynamic Update from the updates folder's SafeOS subfolder (downloaded there when updates.download is set).
+    /// </summary>
+    public bool Update { get; set; } = true;
+
+    /// <summary>
+    /// Languages to show recovery in, from the language media's WinPE packages. Empty (default) leaves WinRE in its
+    /// original language; ["image"] uses every language in the languages section. Each language adds roughly
+    /// 20 packages and tens of MB to WinRE, which lives on the recovery partition of deployed devices.
+    /// </summary>
+    public IReadOnlyList<string> Languages { get; set; } = [];
+
+    /// <summary>The languages to localize WinRE in, with "image" expanded.</summary>
+    public IReadOnlyList<string> ResolveLanguages(LanguagesSection? languages) =>
+        Languages.Any(l => l.Equals(ImageLanguages, StringComparison.OrdinalIgnoreCase))
+            ? languages?.Languages ?? []
+            : Languages;
 }
 
 public sealed record InboxAppsSection
@@ -144,6 +169,9 @@ public sealed record UpdatesSection
 
     /// <summary>When downloading, also fetch the latest .NET Framework cumulative update.</summary>
     public bool IncludeDotNet { get; set; } = true;
+
+    /// <summary>Subfolder of <see cref="Folder"/> for Safe OS Dynamic Updates, which apply to WinRE only.</summary>
+    public const string SafeOSFolderName = "SafeOS";
 }
 
 public sealed record OutputSection

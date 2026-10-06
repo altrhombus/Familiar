@@ -29,8 +29,17 @@ public sealed class MountedImage : IAsyncDisposable
     private DismSession Session => _session ?? throw new ObjectDisposedException(nameof(MountedImage));
 
     /// <summary>Mounts an index read-write. The DISM API must be initialized (see <see cref="Images.DismHost"/>).</summary>
-    public static async Task<MountedImage> MountAsync(
-        string imagePath, int index, string mountPath, IProgress<ServicingProgress>? progress = null, CancellationToken cancellationToken = default)
+    public static Task<MountedImage> MountAsync(
+        string imagePath, int index, string mountPath, IProgress<ServicingProgress>? progress = null, CancellationToken cancellationToken = default) =>
+        MountAsync(imagePath, index, mountPath, readOnly: false, progress, cancellationToken);
+
+    /// <summary>Mounts an index for reading only; nothing can be saved.</summary>
+    public static Task<MountedImage> MountReadOnlyAsync(
+        string imagePath, int index, string mountPath, IProgress<ServicingProgress>? progress = null, CancellationToken cancellationToken = default) =>
+        MountAsync(imagePath, index, mountPath, readOnly: true, progress, cancellationToken);
+
+    private static async Task<MountedImage> MountAsync(
+        string imagePath, int index, string mountPath, bool readOnly, IProgress<ServicingProgress>? progress, CancellationToken cancellationToken)
     {
         Directory.CreateDirectory(mountPath);
         if (Directory.EnumerateFileSystemEntries(mountPath).Any())
@@ -40,7 +49,7 @@ public sealed class MountedImage : IAsyncDisposable
 
         var operation = $"Mount index {index}";
         progress?.Report(ServicingProgress.Started(operation));
-        await DismApi.MountImageAsync(imagePath, mountPath, index, readOnly: false, DismMountImageOptions.None,
+        await DismApi.MountImageAsync(imagePath, mountPath, index, readOnly, DismMountImageOptions.None,
             Report(progress, operation), cancellationToken).ConfigureAwait(false);
 
         try

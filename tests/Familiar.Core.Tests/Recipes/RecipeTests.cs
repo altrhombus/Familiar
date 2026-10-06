@@ -39,7 +39,6 @@ public class RecipeTests
         var recipe = RecipeSerializer.Parse(Minimal, @"C:\Recipes");
 
         Assert.Equal([LanguageFeature.OCR, LanguageFeature.TextToSpeech], recipe.Languages!.Features);
-        Assert.True(recipe.Languages.UpdateWinRE);
         Assert.True(recipe.Output.CleanupComponents);
     }
 
@@ -54,8 +53,44 @@ public class RecipeTests
         Assert.Equal(1, recipe.Source.Index);
         Assert.Equal(@"C:\FamiliarWork", recipe.WorkingDirectory);
         Assert.True(recipe.Languages!.IncludeFonts);
-        Assert.True(recipe.Languages.UpdateWinRE);
+        Assert.True(recipe.WinRE.Update);
+        Assert.Empty(recipe.WinRE.Languages);
         Assert.True(recipe.Output.CleanupComponents);
+    }
+
+    [Fact]
+    public void WinRELanguages_Image_MeansEveryImageLanguage()
+    {
+        var recipe = RecipeSerializer.Parse(
+            """{ "source": { "path": "a.wim" }, "languages": { "mediaPath": "x", "languages": ["de-DE", "ja-JP"] }, "winRE": { "languages": ["Image"] }, "output": { "path": "o.wim" } }""",
+            @"C:\Recipes");
+
+        Assert.Equal(["de-DE", "ja-JP"], recipe.WinRE.ResolveLanguages(recipe.Languages));
+        Assert.Empty(RecipeValidator.Validate(recipe, checkFiles: false));
+    }
+
+    [Fact]
+    public void WinRELanguages_Listed_AreUsedAsGiven()
+    {
+        var template = RecipeSerializer.Template();
+        var recipe = template with { WinRE = new WinRESection { Languages = ["de-DE"] } };
+
+        Assert.Equal(["de-DE"], recipe.WinRE.ResolveLanguages(recipe.Languages));
+    }
+
+    [Theory]
+    [InlineData(false, new[] { "de-DE" }, "needs a languages section")]
+    [InlineData(true, new[] { "image", "de-DE" }, "on its own")]
+    public void Validate_WinRELanguages(bool hasLanguages, string[] winRELanguages, string expected)
+    {
+        var template = RecipeSerializer.Template();
+        var recipe = template with
+        {
+            Languages = hasLanguages ? template.Languages : null,
+            WinRE = new WinRESection { Languages = winRELanguages },
+        };
+
+        Assert.Contains(RecipeValidator.Validate(recipe, checkFiles: false), e => e.Contains(expected, StringComparison.Ordinal));
     }
 
     [Fact]

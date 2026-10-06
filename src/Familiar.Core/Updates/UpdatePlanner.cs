@@ -53,7 +53,8 @@ public static partial class UpdatePlanner
     /// updates is to install each MSU individually in order, so Windows updates known to the release data go in
     /// release-date order (checkpoints first), followed by anything else (for example .NET cumulative updates).
     /// </summary>
-    public static ServicingPlan Plan(IEnumerable<UpdateFile> files, UpdateTarget target, ReleaseCatalog? catalog)
+    /// <param name="cumulativeOnly">Plan only the Windows cumulative updates the release data knows (for WinRE, which takes no .NET).</param>
+    public static ServicingPlan Plan(IEnumerable<UpdateFile> files, UpdateTarget target, ReleaseCatalog? catalog, bool cumulativeOnly = false)
     {
         ArgumentNullException.ThrowIfNull(files);
         ArgumentNullException.ThrowIfNull(target);
@@ -110,6 +111,11 @@ public static partial class UpdatePlanner
         foreach (var (file, update) in known.OrderBy(k => k.Update.ReleaseDate).ThenBy(k => k.Update.Revision))
         {
             actions.Add(new AddPackageAction(file.Path, $"{update.KbArticle} cumulative update ({update.Build}.{update.Revision}, {update.ReleaseDate:yyyy-MM-dd})"));
+        }
+
+        if (cumulativeOnly)
+        {
+            unknown.Clear();
         }
 
         // .NET cumulative updates (file names carry "ndp", e.g. -ndp481_) supersede each other but are not in the

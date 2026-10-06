@@ -5,8 +5,11 @@ using Familiar.Core.Servicing;
 
 namespace Familiar.Core.Updates;
 
-/// <summary>What to fetch for one release: the cumulative update (with checkpoints) and optionally .NET.</summary>
-public sealed record UpdateSelection(CatalogEntry CumulativeUpdate, CatalogEntry? DotNet);
+/// <summary>
+/// What to fetch for one release: the cumulative update (with checkpoints), and optionally .NET and the Safe OS
+/// Dynamic Update for WinRE.
+/// </summary>
+public sealed record UpdateSelection(CatalogEntry CumulativeUpdate, CatalogEntry? DotNet, CatalogEntry? SafeOS = null);
 
 public sealed record DownloadedFile(string Path, bool AlreadyPresent);
 
@@ -56,7 +59,8 @@ public sealed class UpdateDownloader(HttpClient http, ReleaseCatalog catalog)
     /// on catalog search ranking.
     /// </summary>
     public async Task<UpdateSelection> SelectAsync(
-        WindowsRelease release, string architecture, bool includeDotNet, bool includePreview = false, CancellationToken cancellationToken = default)
+        WindowsRelease release, string architecture, bool includeDotNet, bool includePreview = false, bool includeSafeOS = false,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(release);
         if (release.OsType != WindowsOsType.Client)
@@ -82,7 +86,20 @@ public sealed class UpdateDownloader(HttpClient http, ReleaseCatalog catalog)
                 .FirstOrDefault();
         }
 
-        return new UpdateSelection(cumulative, dotNet);
+        CatalogEntry? safeOS = null;
+        if (includeSafeOS)
+        {
+            // Some months have two; the most recently published one supersedes the other.
+            var query = $"Safe OS Dynamic Update Windows {release.MajorVersion} {release.Version} {architecture}";
+            safeOS = (await _client.SearchAsync(query, cancellationToken).ConfigureAwait(false))
+                .Where(e => IsSafeOSUpdateFor(e.Title, release, architecture))
+                .OrderByDescending(e => e.LastUpdated)
+                .ThenByDescending(e => e.Title, StringComparer.Ordinal)
+                .FirstOrDefault()
+                ?? throw new InvalidOperationException($"The Update Catalog has no {architecture} Safe OS Dynamic Update for {release.Name}.");
+        }
+
+        return new UpdateSelection(cumulative, dotNet, safeOS);
     }
 
     /// <summary>Name of the file recording what Familiar downloaded into a folder.</summary>
@@ -92,37 +109,50 @@ public sealed class UpdateDownloader(HttpClient http, ReleaseCatalog catalog)
     /// Downloads every file for the selected updates into <paramref name="folder"/>, verifying SHA-1, then removes
     /// files from Familiar's previous download that the new selection supersedes. Cumulative updates replace each
     /// other, and every file left in the folder is installed, so stale ones only add build time. Files Familiar
-    /// did not download are never removed.
+    /// did not download are never removed. The Safe OS update goes in the SafeOS subfolder, which builds apply to
+    /// WinRE only.
     /// </summary>
     public async Task<DownloadResult> DownloadAsync(
         UpdateSelection selection, string folder, IProgress<ServicingProgress>? progress = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(selection);
-        Directory.CreateDirectory(folder);
 
         var downloaded = new List<DownloadedFile>();
-        foreach (var entry in new[] { selection.CumulativeUpdate, selection.DotNet }.OfType<CatalogEntry>())
-        {
-            foreach (var file in await _client.GetFilesAsync(entry.UpdateId, cancellationToken).ConfigureAwait(false))
-            {
-                downloaded.Add(await DownloadFileAsync(file, folder, progress, cancellationToken).ConfigureAwait(false));
-            }
-        }
-
-        var current = downloaded.Select(d => Path.GetFileName(d.Path)).ToList();
         var removed = new List<string>();
-        foreach (var previous in DownloadManifest.Read(folder).Except(current, StringComparer.OrdinalIgnoreCase))
+        await DownloadToAsync(folder, [selection.CumulativeUpdate, selection.DotNet]).ConfigureAwait(false);
+        if (selection.SafeOS is { } safeOS)
         {
-            var path = Path.Combine(folder, previous);
-            if (File.Exists(path))
-            {
-                File.Delete(path);
-                removed.Add(path);
-            }
+            await DownloadToAsync(Path.Combine(folder, Recipes.UpdatesSection.SafeOSFolderName), [safeOS]).ConfigureAwait(false);
         }
 
-        DownloadManifest.Write(folder, current);
         return new DownloadResult(downloaded, removed);
+
+        async Task DownloadToAsync(string target, CatalogEntry?[] entries)
+        {
+            Directory.CreateDirectory(target);
+            var current = new List<string>();
+            foreach (var entry in entries.OfType<CatalogEntry>())
+            {
+                foreach (var file in await _client.GetFilesAsync(entry.UpdateId, cancellationToken).ConfigureAwait(false))
+                {
+                    var result = await DownloadFileAsync(file, target, progress, cancellationToken).ConfigureAwait(false);
+                    downloaded.Add(result);
+                    current.Add(Path.GetFileName(result.Path));
+                }
+            }
+
+            foreach (var previous in DownloadManifest.Read(target).Except(current, StringComparer.OrdinalIgnoreCase))
+            {
+                var path = Path.Combine(target, previous);
+                if (File.Exists(path))
+                {
+                    File.Delete(path);
+                    removed.Add(path);
+                }
+            }
+
+            DownloadManifest.Write(target, current);
+        }
     }
 
     private async Task<DownloadedFile> DownloadFileAsync(CatalogFile file, string folder, IProgress<ServicingProgress>? progress, CancellationToken cancellationToken)
@@ -201,6 +231,13 @@ public sealed class UpdateDownloader(HttpClient http, ReleaseCatalog catalog)
     internal static bool IsDotNetUpdateFor(string title, WindowsRelease release, string architecture) =>
         Regex.IsMatch(title,
             $@"\bCumulative Update (Preview )?for \.NET Framework .* for Windows {release.MajorVersion},? version {Regex.Escape(release.Version)} for {Regex.Escape(architecture)}\b",
+            RegexOptions.IgnoreCase);
+
+    // "2026-09 Safe OS Dynamic Update for Windows 11, version 25H2 for x64-based Systems (KB5125758)"
+    // "2026-04 Safe OS Dynamic Update for Windows 11 Version 25H2 for x64-based Systems (KB5084812)"
+    internal static bool IsSafeOSUpdateFor(string title, WindowsRelease release, string architecture) =>
+        Regex.IsMatch(title,
+            $@"\bSafe OS Dynamic Update for Windows {release.MajorVersion},? version {Regex.Escape(release.Version)} for {Regex.Escape(architecture)}-based Systems\b",
             RegexOptions.IgnoreCase);
 
     private static bool IsPreview(string title) => title.Contains("Preview", StringComparison.OrdinalIgnoreCase);

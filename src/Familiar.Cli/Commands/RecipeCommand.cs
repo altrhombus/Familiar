@@ -117,6 +117,14 @@ internal static class RecipeCommand
                 }
             }
 
+            var winRELanguages = recipe.WinRE.ResolveLanguages(recipe.Languages);
+            var patch = !recipe.WinRE.Update || recipe.Updates is null
+                ? "not patched"
+                : recipe.Updates.Download
+                    ? "patched with the latest Safe OS Dynamic Update (downloaded)"
+                    : $"patched from {Path.Combine(recipe.Updates.Folder, UpdatesSection.SafeOSFolderName)}";
+            Console.WriteLine($"WinRE:   {patch}; {(winRELanguages.Count == 0 ? "original language only" : "localized in " + string.Join(", ", winRELanguages))}");
+
             foreach (var error in errors)
             {
                 Console.WriteLine($"error:   {error}");

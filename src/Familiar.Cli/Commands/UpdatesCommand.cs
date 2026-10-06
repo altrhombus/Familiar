@@ -22,18 +22,19 @@ internal static class UpdatesCommand
         architecture.AcceptOnlyFromAmong("x64", "arm64");
 
         var noDotNet = new Option<bool>("--no-dotnet") { Description = "Skip the .NET Framework cumulative update." };
+        var noSafeOS = new Option<bool>("--no-safe-os") { Description = "Skip the Safe OS Dynamic Update for WinRE (saved in a SafeOS subfolder)." };
         var preview = new Option<bool>("--preview") { Description = "Allow preview (non-security) updates." };
         var folder = new Option<DirectoryInfo>("--folder") { Description = "Where to save updates.", Required = true };
 
         var list = new Command("list", "Show which updates would be downloaded.")
         {
-            release, architecture, noDotNet, preview, CatalogOptions.Offline, CatalogOptions.Refresh,
+            release, architecture, noDotNet, noSafeOS, preview, CatalogOptions.Offline, CatalogOptions.Refresh,
         };
         list.SetAction((parseResult, cancellationToken) => RunAsync(parseResult, download: false, cancellationToken));
 
         var download = new Command("download", "Download the latest updates from the Microsoft Update Catalog.")
         {
-            release, architecture, folder, noDotNet, preview, CatalogOptions.Refresh,
+            release, architecture, folder, noDotNet, noSafeOS, preview, CatalogOptions.Refresh,
         };
         download.SetAction((parseResult, cancellationToken) => RunAsync(parseResult, download: true, cancellationToken));
 
@@ -56,11 +57,17 @@ internal static class UpdatesCommand
 
             try
             {
-                var selection = await downloader.SelectAsync(match, arch, !parseResult.GetValue(noDotNet), parseResult.GetValue(preview), cancellationToken);
+                var selection = await downloader.SelectAsync(
+                    match, arch, !parseResult.GetValue(noDotNet), parseResult.GetValue(preview), !parseResult.GetValue(noSafeOS), cancellationToken);
                 Console.WriteLine(selection.CumulativeUpdate.Title);
                 if (selection.DotNet is { } dotNet)
                 {
                     Console.WriteLine(dotNet.Title);
+                }
+
+                if (selection.SafeOS is { } safeOS)
+                {
+                    Console.WriteLine(safeOS.Title);
                 }
 
                 if (!download)

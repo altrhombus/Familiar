@@ -47,6 +47,15 @@ public sealed class UpdatePlannerTests : IDisposable
     }
 
     [Fact]
+    public void Plan_CumulativeOnly_LeavesOutDotNet()
+    {
+        // WinRE takes the Windows cumulative updates (for their servicing stack) but not .NET.
+        var plan = UpdatePlanner.Plan(Files(DotNet, Target, Checkpoint), new UpdateTarget(Release25H2, "x64", InstalledRevision: null), Catalog, cumulativeOnly: true);
+
+        Assert.Equal([Checkpoint, Target], Paths(plan));
+    }
+
+    [Fact]
     public void Plan_CheckpointFromTheBaselineRelease_IsRecognizedForEnablementRelease()
     {
         // KB5043080 only lists 24H2, but 25H2 is on the same branch.

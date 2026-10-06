@@ -13,9 +13,15 @@ internal static class InfoCommand
             Description = "Path to a WIM or ESD file.",
         };
 
+        var winRE = new Option<bool>("--winre")
+        {
+            Description = "Also show each index's WinRE build, languages and size (mounts the index read-only; slower).",
+        };
+
         var command = new Command("info", "List the indexes in a WIM or ESD file.")
         {
             image,
+            winRE,
             CatalogOptions.Offline,
             CatalogOptions.Refresh,
         };
@@ -38,10 +44,10 @@ internal static class InfoCommand
             var catalog = await CatalogOptions.LoadAsync(parseResult, cancellationToken);
             var today = DateOnly.FromDateTime(DateTime.Today);
 
+            using var dism = new DismHost();
             IReadOnlyList<ImageIndexInfo> indexes;
             try
             {
-                using var dism = new DismHost();
                 indexes = dism.GetIndexes(file.FullName);
             }
             catch (Exception ex) when (DismErrors.Describe(ex) is { } description)
@@ -52,6 +58,13 @@ internal static class InfoCommand
 
             foreach (var index in indexes)
             {
+                await WriteIndexAsync(index);
+            }
+
+            return ExitCodes.Success;
+
+            async Task WriteIndexAsync(ImageIndexInfo index)
+            {
                 var release = catalog.Resolve(index.Version.Build, index.InstallationType);
 
                 Console.WriteLine($"[{index.Index}] {index.Name}");
@@ -60,10 +73,15 @@ internal static class InfoCommand
                 var also = others.Count > 0 ? $" (also {string.Join(", ", others)})" : string.Empty;
                 Console.WriteLine($"    Language:  {index.DefaultLanguage ?? "unknown"}{also}");
 
+                if (parseResult.GetValue(winRE))
+                {
+                    await WriteWinREAsync(index);
+                }
+
                 if (release is null)
                 {
                     Console.WriteLine($"    Release:   unknown build {index.Version} (try --refresh)");
-                    continue;
+                    return;
                 }
 
                 var baseline = release.SharesBaseline ? $", servicing baseline {release.ServicingBaselineBuild}" : string.Empty;
@@ -85,7 +103,26 @@ internal static class InfoCommand
                 }
             }
 
-            return ExitCodes.Success;
+            async Task WriteWinREAsync(ImageIndexInfo index)
+            {
+                try
+                {
+                    var recovery = await dism.GetWinREAsync(file.FullName, index.Index, cancellationToken);
+                    if (recovery is null)
+                    {
+                        Console.WriteLine("    WinRE:     none");
+                        return;
+                    }
+
+                    var others = recovery.Languages.Where(l => !string.Equals(l, recovery.DefaultLanguage, StringComparison.OrdinalIgnoreCase)).ToList();
+                    var also = others.Count > 0 ? $" (also {string.Join(", ", others)})" : string.Empty;
+                    Console.WriteLine($"    WinRE:     build {recovery.Version.Build}.{recovery.Version.Revision}, {recovery.SizeBytes >> 20} MB, {recovery.DefaultLanguage ?? "unknown"}{also}");
+                }
+                catch (Exception ex) when (DismErrors.Describe(ex) is { } description)
+                {
+                    Console.WriteLine($"    WinRE:     could not read ({description})");
+                }
+            }
         });
 
         return command;

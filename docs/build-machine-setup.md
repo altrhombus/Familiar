@@ -123,8 +123,14 @@ familiar info D:\Familiar\Output\Windows11-25H2-Enterprise.wim
 On the walkthrough VM, a 25H2 Enterprise build with 16 languages, 46 inbox apps, the latest cumulative update
 and the .NET update took about **70 minutes**; the cumulative update alone took about 25.
 
-Languages added to WinRE make it larger. The build logs WinRE's size before and after, and warns when it grew;
-check it against the recovery partition your task sequence creates, or recovery is disabled on deployed devices.
+With updates in the recipe, WinRE is patched too: the build downloads the month's Safe OS Dynamic Update into the
+updates folder's `SafeOS` subfolder and logs WinRE's build before and after. WinRE stays in its original language
+unless `winRE.languages` lists languages; each one adds about 20 packages and makes WinRE larger. The build logs
+WinRE's size and warns when localizing grew it, so check it against the recovery partition your task sequence
+creates, or recovery is disabled on deployed devices. 13 languages took WinRE to 777 MB.
+
+`familiar info <wim> --winre` shows the WinRE build, languages and size without rebuilding (it mounts the image
+read-only, so it takes a minute or two).
 
 `info` should show the latest cumulative update before you publish. Publishing refuses an image older than the
 package's current build unless the recipe sets `allowOlderImage`.

@@ -59,6 +59,18 @@ public static class RecipeValidator
             }
         }
 
+        if (recipe.WinRE.Languages.Count > 0)
+        {
+            if (recipe.Languages is null)
+            {
+                errors.Add("winRE.languages needs a languages section; its media has the WinPE language packs.");
+            }
+            else if (recipe.WinRE.Languages.Count > 1 && recipe.WinRE.Languages.Contains(WinRESection.ImageLanguages, StringComparer.OrdinalIgnoreCase))
+            {
+                errors.Add($"winRE.languages: use [\"{WinRESection.ImageLanguages}\"] on its own, or list languages.");
+            }
+        }
+
         if (recipe.ConfigMgr is { } configMgr)
         {
             if (configMgr.PackageId is null && configMgr.PackageSourcePath is null)

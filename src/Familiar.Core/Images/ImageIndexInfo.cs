@@ -10,3 +10,6 @@ public sealed record ImageIndexInfo(
     Version Version,
     string? DefaultLanguage,
     IReadOnlyList<string> Languages);
+
+/// <summary>The Windows Recovery image inside an index.</summary>
+public sealed record WinREInfo(Version Version, string? DefaultLanguage, IReadOnlyList<string> Languages, long SizeBytes);

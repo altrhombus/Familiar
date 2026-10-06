@@ -74,5 +74,16 @@ public class UpdateCatalogTests
         Assert.Equal(expected, UpdateDownloader.IsDotNetUpdateFor(title, Windows11_25H2, "x64"));
     }
 
+    [Theory]
+    [InlineData("2026-09 Safe OS Dynamic Update for Windows 11, version 25H2 for x64-based Systems (KB5125758)", true)]
+    [InlineData("2026-04 Safe OS Dynamic Update for Windows 11 Version 25H2 for x64-based Systems (KB5084812)", true)]
+    [InlineData("2026-09 Safe OS Dynamic Update for Windows 11, version 25H2 for arm64-based Systems (KB5125758)", false)]
+    [InlineData("2026-09 Safe OS Dynamic Update for Windows 11, version 24H2 for x64-based Systems (KB5125758)", false)]
+    [InlineData("2026-09 Setup Dynamic Update for Windows 11, version 25H2 for x64-based Systems (KB5125759)", false)]
+    public void IsSafeOSUpdateFor_MatchesReleaseAndArchitecture(string title, bool expected)
+    {
+        Assert.Equal(expected, UpdateDownloader.IsSafeOSUpdateFor(title, Windows11_25H2, "x64"));
+    }
+
     private static string Fixture(string name) => File.ReadAllText(Path.Combine(FixtureFolder, name));
 }
