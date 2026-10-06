@@ -70,7 +70,7 @@ internal static class ConfigMgrCommand
                 Console.WriteLine("OS image packages:");
                 foreach (var package in (await connection.GetImagePackagesAsync(cancellationToken)).OrderBy(p => p.Name, StringComparer.OrdinalIgnoreCase))
                 {
-                    Console.WriteLine($"  {package.PackageId}  {package.Name} {package.Version}  [{package.ImageOSVersion}]  {package.SourcePath}");
+                    Console.WriteLine($"  {package.PackageId}  {package.Name} {package.Version}  [{package.ImageOSVersion}]  content v{package.SourceVersion}  {package.SourcePath}");
                 }
 
                 Console.WriteLine();

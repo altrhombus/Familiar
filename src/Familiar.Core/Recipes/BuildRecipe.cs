@@ -71,7 +71,7 @@ public sealed record ConfigMgrSection
     /// <summary>Package name for new packages; defaults to the recipe name.</summary>
     public string? PackageName { get; init; }
 
-    /// <summary>Defaults to the build date (yyyy.MM.dd).</summary>
+    /// <summary>For new packages, defaults to the build date (yyyy.MM.dd). Existing packages keep theirs unless set.</summary>
     public string? Version { get; init; }
 
     public string? Description { get; init; }

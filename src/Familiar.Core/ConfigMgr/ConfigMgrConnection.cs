@@ -13,13 +13,18 @@ public enum ConfigMgrTransport
 }
 
 /// <summary>An OS image package (SMS_ImagePackage).</summary>
+/// <param name="SourceVersion">
+/// Content version at the site; it increments when content is pushed to distribution points, so comparing it
+/// before and after a change shows whether redistribution started.
+/// </param>
 public sealed record ImagePackage(
     string PackageId,
     string Name,
     string? Version,
     string? Description,
     string? SourcePath,
-    string? ImageOSVersion);
+    string? ImageOSVersion,
+    long? SourceVersion = null);
 
 /// <summary>A distribution point group (SMS_DistributionPointGroup).</summary>
 public sealed record DistributionPointGroup(string GroupId, string Name, int MemberCount);

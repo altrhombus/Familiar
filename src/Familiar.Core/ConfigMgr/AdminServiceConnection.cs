@@ -194,7 +194,8 @@ public sealed class AdminServiceConnection : IConfigMgrConnection
 
     private static ImagePackage ToImagePackage(JsonNode? node) => new(
         Text(node, "PackageID")!, Text(node, "Name") ?? string.Empty, Text(node, "Version"), Text(node, "Description"),
-        Text(node, "PkgSourcePath"), Text(node, "ImageOSVersion"));
+        Text(node, "PkgSourcePath"), Text(node, "ImageOSVersion"),
+        node?["SourceVersion"] is JsonValue sourceVersion && sourceVersion.TryGetValue<long>(out var version) ? version : null);
 
     private static string Truncate(string value) => value.Length <= 300 ? value : value[..300] + "…";
 }

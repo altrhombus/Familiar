@@ -135,7 +135,8 @@ public sealed class BuildRunner(
                 PackageId = section.PackageId,
                 PackageSourcePath = section.PackageSourcePath,
                 Name = section.PackageName ?? recipe.Name ?? Path.GetFileNameWithoutExtension(wimPath),
-                Version = section.Version ?? DateTime.Now.ToString("yyyy.MM.dd", CultureInfo.InvariantCulture),
+                // Existing packages keep their version unless the recipe sets one; new ones get the build date.
+                Version = section.Version ?? (section.PackageId is null ? DateTime.Now.ToString("yyyy.MM.dd", CultureInfo.InvariantCulture) : null),
                 Description = section.Description,
                 DistributionPointGroups = section.DistributionPointGroups,
                 DistributionPoints = section.DistributionPoints,

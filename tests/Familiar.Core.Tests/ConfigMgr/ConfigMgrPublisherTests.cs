@@ -218,6 +218,32 @@ public sealed class ConfigMgrPublisherTests : IDisposable
         Assert.True(File.Exists(Path.Combine(root, "25H2_AMD64_1", "install-25h2.wim")));
     }
 
+    [Theory]
+    [InlineData(false, "still serve the previous content")]
+    [InlineData(true, "content version changed from 7 to 8")]
+    public async Task WithoutRefresh_ChecksTheSiteDidNotRedistributeAnyway(bool redistributes, string expected)
+    {
+        var current = Path.Combine(_root, "Images", "25H2_AMD64_2601_1", "install.wim");
+        Directory.CreateDirectory(Path.GetDirectoryName(current)!);
+        File.WriteAllBytes(current, [9]);
+        var site = new FakeSite
+        {
+            Existing = new ImagePackage("PS1000A1", "Windows 11 25H2 Enterprise AMD64", null, null, current, null, SourceVersion: 7),
+            RedistributesOnChange = redistributes,
+        };
+
+        var result = await new ConfigMgrPublisher(site).PublishAsync(_wim, new ConfigMgrPublishRequest
+        {
+            PackageId = "PS1000A1",
+            Name = "x",
+            SourceFolderName = "25H2_AMD64_2610_{n}",
+            RefreshDistributionPoints = false,
+        }, cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Contains(result.Warnings, w => w.Contains(expected, StringComparison.Ordinal));
+        Assert.DoesNotContain("refresh PS1000A1", site.Calls);
+    }
+
     [Fact]
     public async Task VersionUpdateRejected_IsAWarningNotAFailure()
     {
@@ -261,6 +287,9 @@ public sealed class ConfigMgrPublisherTests : IDisposable
 
         public bool RejectUpdates { get; init; }
 
+        /// <summary>Simulate a site that starts redistributing when the package changes.</summary>
+        public bool RedistributesOnChange { get; init; }
+
         /// <summary>Accept source path updates without applying them.</summary>
         public bool IgnoreSourceUpdates { get; init; }
 
@@ -300,7 +329,15 @@ public sealed class ConfigMgrPublisherTests : IDisposable
             return Task.CompletedTask;
         }
 
-        public Task ReloadImagePropertiesAsync(string packageId, CancellationToken cancellationToken = default) => Record($"reload {packageId}");
+        public Task ReloadImagePropertiesAsync(string packageId, CancellationToken cancellationToken = default)
+        {
+            if (RedistributesOnChange && Existing is not null)
+            {
+                Existing = Existing with { SourceVersion = (Existing.SourceVersion ?? 0) + 1 };
+            }
+
+            return Record($"reload {packageId}");
+        }
 
         public Task RefreshDistributionPointsAsync(string packageId, CancellationToken cancellationToken = default) => Record($"refresh {packageId}");
 

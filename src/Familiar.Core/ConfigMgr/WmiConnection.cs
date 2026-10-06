@@ -219,5 +219,6 @@ public sealed class WmiConnection : IConfigMgrConnection
 
     private static ImagePackage ToImagePackage(CimInstance i) => new(
         String(i, "PackageID")!, String(i, "Name") ?? string.Empty, String(i, "Version"), String(i, "Description"),
-        String(i, "PkgSourcePath"), String(i, "ImageOSVersion"));
+        String(i, "PkgSourcePath"), String(i, "ImageOSVersion"),
+        i.CimInstanceProperties["SourceVersion"]?.Value is { } sourceVersion ? Convert.ToInt64(sourceVersion, System.Globalization.CultureInfo.InvariantCulture) : null);
 }

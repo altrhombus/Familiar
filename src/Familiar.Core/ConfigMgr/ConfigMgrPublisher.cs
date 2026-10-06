@@ -101,6 +101,7 @@ public sealed class ConfigMgrPublisher(IConfigMgrConnection connection)
         string packageId;
         bool created;
         string? previous = null;
+        long? sourceVersionBefore = null;
         if (request.PackageId is { } existingId)
         {
             var package = await connection.GetImagePackageAsync(existingId, cancellationToken).ConfigureAwait(false)
@@ -111,6 +112,7 @@ public sealed class ConfigMgrPublisher(IConfigMgrConnection connection)
             }
 
             log($"Updating OS image package {package.PackageId} ({package.Name}); source {package.SourcePath}");
+            sourceVersionBefore = package.SourceVersion;
 
             if (request.SourceFolderName is { } template)
             {
@@ -193,7 +195,16 @@ public sealed class ConfigMgrPublisher(IConfigMgrConnection connection)
         }
         else if (!created)
         {
-            warnings.Add($"Distribution points still serve the previous content of {packageId}. Update them from the console when the new image is tested, or run 'familiar configmgr rollback' to restore the previous image.");
+            // Holding content back assumes the site only redistributes when asked; check that it did not start anyway.
+            var after = (await connection.GetImagePackageAsync(packageId, cancellationToken).ConfigureAwait(false))?.SourceVersion;
+            if (sourceVersionBefore is not null && after is not null && after != sourceVersionBefore)
+            {
+                warnings.Add($"refreshDistributionPoints is false, but {packageId}'s content version changed from {sourceVersionBefore} to {after}: the site may already be sending the new image to distribution points. Check its content status in the console.");
+            }
+            else
+            {
+                warnings.Add($"Distribution points still serve the previous content of {packageId} (content version {after?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "unknown"}). Update them from the console when the new image is tested, or run 'familiar configmgr rollback' to restore the previous image.");
+            }
         }
 
         var targeted = created ? [] : await connection.GetPackageTargetsAsync(packageId, cancellationToken).ConfigureAwait(false);
