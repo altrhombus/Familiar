@@ -72,7 +72,30 @@ public class AdminServiceConnectionTests
             connection.UpdateImagePackageAsync("PS100123", "2", null, cancellationToken: TestContext.Current.CancellationToken));
 
         Assert.Contains("does not support the operation", ex.Message, StringComparison.Ordinal);
-        Assert.Equal("PATCH", handler.Requests[1].Method);
+    }
+
+    [Fact]
+    public async Task UpdateImagePackage_PostsToTheClassWithTheKey()
+    {
+        var handler = new FakeHandler(r => r.Method == "GET" ? Json("""{ "value": [ { "SiteCode": "PS1" } ] }""") : Json("{}"));
+        await using var connection = await Connect(handler);
+
+        await connection.UpdateImagePackageAsync("ps1000b2", "2026.10.06", null, @"\\s\Images\25H2_AMD64_2610_2\install.wim", TestContext.Current.CancellationToken);
+
+        var update = handler.Requests[1];
+        Assert.Equal(("POST", "https://cm01.contoso.com/AdminService/wmi/SMS_ImagePackage"), (update.Method, update.Uri));
+        Assert.Equal("""{"Version":"2026.10.06","PkgSourcePath":"\\\\s\\Images\\25H2_AMD64_2610_2\\install.wim","PackageID":"PS1000B2"}""", update.Body);
+    }
+
+    [Fact]
+    public async Task UpdateImagePackage_NothingToChange_SendsNothing()
+    {
+        var handler = new FakeHandler(_ => Json("""{ "value": [ { "SiteCode": "PS1" } ] }"""));
+        await using var connection = await Connect(handler);
+
+        await connection.UpdateImagePackageAsync("PS1000B2", null, null, null, TestContext.Current.CancellationToken);
+
+        Assert.Single(handler.Requests);
     }
 
     [Fact]

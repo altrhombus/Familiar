@@ -7,10 +7,10 @@ namespace Familiar.Core.ConfigMgr;
 
 /// <summary>
 /// Talks to the SMS Provider through the administration service's WMI route
-/// (<c>https://provider/AdminService/wmi/</c>) with Windows authentication. Queries and static methods follow
-/// Microsoft's documented forms. Creating instances (POST to the class) and instance methods
-/// (<c>Class('key')/AdminService.Method</c>) follow the established OData pattern the service uses for its v1.0
-/// route; property updates use PATCH and fall back to WMI if the site rejects them.
+/// (<c>https://provider/AdminService/wmi/</c>) with Windows authentication. Microsoft documents GET and POST on
+/// this route, with queries and static methods as examples. Creating instances (POST to the class) and instance
+/// methods (<c>Class('key')/AdminService.Method</c>) are not documented but work on 2603; property updates are a
+/// POST with the key in the body and fall back to WMI if the site rejects them.
 /// </summary>
 public sealed class AdminServiceConnection : IConfigMgrConnection
 {
@@ -98,6 +98,12 @@ public sealed class AdminServiceConnection : IConfigMgrConnection
         return match?.PackageId ?? throw new ConfigMgrException("The site accepted the new image package but it could not be found afterwards.");
     }
 
+    /// <remarks>
+    /// The WMI route only supports GET and POST; PATCH returns NotImplemented (seen on 2603). An update is a POST to
+    /// the class with the key property in the body, which the provider treats as a put of the existing instance.
+    /// That form is community-documented rather than Microsoft-documented, so callers verify the result and fall
+    /// back to WMI.
+    /// </remarks>
     public async Task UpdateImagePackageAsync(string packageId, string? version, string? description, string? sourcePath = null, CancellationToken cancellationToken = default)
     {
         var body = new JsonObject();
@@ -118,7 +124,8 @@ public sealed class AdminServiceConnection : IConfigMgrConnection
 
         if (body.Count > 0)
         {
-            await SendAsync(HttpMethod.Patch, $"SMS_ImagePackage('{ConfigMgrIds.Package(packageId)}')", body, cancellationToken).ConfigureAwait(false);
+            body["PackageID"] = ConfigMgrIds.Package(packageId);
+            await SendAsync(HttpMethod.Post, "SMS_ImagePackage", body, cancellationToken).ConfigureAwait(false);
         }
     }
 
