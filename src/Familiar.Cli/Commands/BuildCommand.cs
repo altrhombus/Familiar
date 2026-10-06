@@ -16,10 +16,16 @@ internal static class BuildCommand
             Description = "Write the DISM API log here (useful when a package fails to apply).",
         };
 
+        var noPublish = new Option<bool>("--no-publish")
+        {
+            Description = "Skip the recipe's configMgr section; publish later with 'familiar configmgr publish <recipe>'.",
+        };
+
         var command = new Command("build", "Build an image from a recipe.")
         {
             path,
             logFile,
+            noPublish,
             CatalogOptions.Offline,
             CatalogOptions.Refresh,
         };
@@ -36,6 +42,12 @@ internal static class BuildCommand
             if (recipe is null)
             {
                 return ExitCodes.Invalid;
+            }
+
+            if (parseResult.GetValue(noPublish) && recipe.ConfigMgr is not null)
+            {
+                Console.WriteLine("Not publishing to Configuration Manager (--no-publish).");
+                recipe = recipe with { ConfigMgr = null };
             }
 
             var catalog = await CatalogOptions.LoadAsync(parseResult, cancellationToken);
