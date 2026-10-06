@@ -22,6 +22,20 @@ public class FallbackConnectionTests
     }
 
     [Fact]
+    public async Task UpdateAcceptedButNotApplied_FallsBackToo()
+    {
+        var primary = new Recorder(rejectUpdates: false) { IgnoreSource = true };
+        var fallback = new Recorder(rejectUpdates: false);
+        var log = new List<string>();
+        await using var connection = new FallbackConnection(primary, _ => Task.FromResult<IConfigMgrConnection>(fallback), log.Add);
+
+        await connection.UpdateImagePackageAsync("PS1000B2", null, null, @"\\s\new.wim", TestContext.Current.CancellationToken);
+
+        Assert.Equal(["update PS1000B2  \\\\s\\new.wim"], fallback.Calls);
+        Assert.Contains(log, l => l.Contains("still points at", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task OtherOperations_StayOnThePrimary()
     {
         var primary = new Recorder(rejectUpdates: false);
@@ -37,6 +51,11 @@ public class FallbackConnectionTests
     {
         public List<string> Calls { get; } = [];
 
+        /// <summary>Accept updates without applying the source path, like a site ignoring an unsupported form.</summary>
+        public bool IgnoreSource { get; init; }
+
+        private string? _source;
+
         public ConfigMgrTransport Transport => ConfigMgrTransport.AdminService;
 
         public string SiteCode => "PS1";
@@ -49,6 +68,11 @@ public class FallbackConnectionTests
             }
 
             Calls.Add($"update {packageId} {version} {sourcePath}");
+            if (!IgnoreSource)
+            {
+                _source = sourcePath ?? _source;
+            }
+
             return Task.CompletedTask;
         }
 
@@ -60,7 +84,8 @@ public class FallbackConnectionTests
 
         public Task<IReadOnlyList<ImagePackage>> GetImagePackagesAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
 
-        public Task<ImagePackage?> GetImagePackageAsync(string packageId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<ImagePackage?> GetImagePackageAsync(string packageId, CancellationToken cancellationToken = default) =>
+            Task.FromResult<ImagePackage?>(new ImagePackage(packageId, "x", null, null, _source ?? @"\s\old.wim", null));
 
         public Task<string> CreateImagePackageAsync(string name, string? version, string? description, string sourcePath, CancellationToken cancellationToken = default) => throw new NotSupportedException();
 

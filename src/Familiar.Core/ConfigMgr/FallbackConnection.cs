@@ -15,16 +15,28 @@ internal sealed class FallbackConnection(IConfigMgrConnection primary, Func<Canc
 
     public async Task UpdateImagePackageAsync(string packageId, string? version, string? description, string? sourcePath = null, CancellationToken cancellationToken = default)
     {
+        string reason;
         try
         {
             await primary.UpdateImagePackageAsync(packageId, version, description, sourcePath, cancellationToken).ConfigureAwait(false);
+
+            // The update form is undocumented, so an accepted request is not proof; check the one change that matters.
+            var actual = sourcePath is null ? null : (await primary.GetImagePackageAsync(packageId, cancellationToken).ConfigureAwait(false))?.SourcePath;
+            if (sourcePath is null || string.Equals(actual, sourcePath, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            reason = $"it accepted the update but the package still points at {actual}";
         }
         catch (ConfigMgrException ex)
         {
-            log($"The administration service rejected the property update ({ex.Message}); retrying over WMI.");
-            _fallback ??= await openFallback(cancellationToken).ConfigureAwait(false);
-            await _fallback.UpdateImagePackageAsync(packageId, version, description, sourcePath, cancellationToken).ConfigureAwait(false);
+            reason = $"it rejected the update: {ex.Message}";
         }
+
+        log($"The administration service did not update {packageId} ({reason}); retrying over WMI.");
+        _fallback ??= await openFallback(cancellationToken).ConfigureAwait(false);
+        await _fallback.UpdateImagePackageAsync(packageId, version, description, sourcePath, cancellationToken).ConfigureAwait(false);
     }
 
     public Task<IReadOnlyList<ImagePackage>> GetImagePackagesAsync(CancellationToken cancellationToken = default) => primary.GetImagePackagesAsync(cancellationToken);
