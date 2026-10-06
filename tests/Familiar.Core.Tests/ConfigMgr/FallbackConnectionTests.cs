@@ -5,69 +5,45 @@ namespace Familiar.Core.Tests.ConfigMgr;
 public class FallbackConnectionTests
 {
     [Fact]
-    public async Task RejectedUpdate_IsRetriedOverTheFallback_OpenedOnce()
+    public async Task Updates_GoStraightToWmi_OpenedOnce()
     {
-        var primary = new Recorder(rejectUpdates: true);
-        var fallback = new Recorder(rejectUpdates: false);
+        var primary = new Recorder();
+        var wmi = new Recorder();
         var opened = 0;
         var log = new List<string>();
-        await using var connection = new FallbackConnection(primary, _ => { opened++; return Task.FromResult<IConfigMgrConnection>(fallback); }, log.Add);
+        await using var connection = new FallbackConnection(primary, _ => { opened++; return Task.FromResult<IConfigMgrConnection>(wmi); }, log.Add);
 
-        await connection.UpdateImagePackageAsync("PS1000A1", "1", null, @"\\s\a.wim", TestContext.Current.CancellationToken);
-        await connection.UpdateImagePackageAsync("PS1000A1", "2", null, null, TestContext.Current.CancellationToken);
+        await connection.UpdateImagePackageAsync("PS1000B2", "1", null, @"\\s\a.wim", TestContext.Current.CancellationToken);
+        await connection.UpdateImagePackageAsync("PS1000B2", "2", null, null, TestContext.Current.CancellationToken);
 
         Assert.Equal(1, opened);
-        Assert.Equal(["update PS1000A1 1 \\\\s\\a.wim", "update PS1000A1 2 "], fallback.Calls);
-        Assert.Contains(log, l => l.Contains("retrying over WMI", StringComparison.Ordinal));
+        Assert.Empty(primary.Calls);
+        Assert.Equal(["update PS1000B2 1 \\\\s\\a.wim", "update PS1000B2 2 "], wmi.Calls);
+        Assert.Single(log);
     }
 
     [Fact]
-    public async Task UpdateAcceptedButNotApplied_FallsBackToo()
+    public async Task NothingToUpdate_DoesNotOpenWmi()
     {
-        var primary = new Recorder(rejectUpdates: false) { IgnoreSource = true };
-        var fallback = new Recorder(rejectUpdates: false);
-        var log = new List<string>();
-        await using var connection = new FallbackConnection(primary, _ => Task.FromResult<IConfigMgrConnection>(fallback), log.Add);
+        await using var connection = new FallbackConnection(new Recorder(), _ => throw new InvalidOperationException("should not open"), _ => { });
 
-        await connection.UpdateImagePackageAsync("PS1000B2", null, null, @"\\s\new.wim", TestContext.Current.CancellationToken);
-
-        Assert.Equal(["update PS1000B2  \\\\s\\new.wim"], fallback.Calls);
-        Assert.Contains(log, l => l.Contains("still points at", StringComparison.Ordinal));
+        await connection.UpdateImagePackageAsync("PS1000B2", null, null, null, TestContext.Current.CancellationToken);
     }
 
     [Fact]
-    public async Task SideEffects_AreNotRetriedOverWmi()
+    public async Task OtherOperations_StayOnTheAdministrationService()
     {
-        var primary = new Recorder(rejectUpdates: false) { SideEffect = true };
+        var primary = new Recorder();
         await using var connection = new FallbackConnection(primary, _ => throw new InvalidOperationException("should not open"), _ => { });
 
-        await Assert.ThrowsAsync<ConfigMgrSideEffectException>(() =>
-            connection.UpdateImagePackageAsync("PS1000B2", null, null, @"\\s\new.wim", TestContext.Current.CancellationToken));
+        await connection.ReloadImagePropertiesAsync("PS1000B2", TestContext.Current.CancellationToken);
+
+        Assert.Equal(["reload PS1000B2"], primary.Calls);
     }
 
-    [Fact]
-    public async Task OtherOperations_StayOnThePrimary()
-    {
-        var primary = new Recorder(rejectUpdates: false);
-        await using var connection = new FallbackConnection(primary, _ => throw new InvalidOperationException("should not open"), _ => { });
-
-        await connection.ReloadImagePropertiesAsync("PS1000A1", TestContext.Current.CancellationToken);
-        await connection.UpdateImagePackageAsync("PS1000A1", "1", null, null, TestContext.Current.CancellationToken);
-
-        Assert.Equal(["reload PS1000A1", "update PS1000A1 1 "], primary.Calls);
-    }
-
-    private sealed class Recorder(bool rejectUpdates) : IConfigMgrConnection
+    private sealed class Recorder : IConfigMgrConnection
     {
         public List<string> Calls { get; } = [];
-
-        /// <summary>Accept updates without applying the source path, like a site ignoring an unsupported form.</summary>
-        public bool IgnoreSource { get; init; }
-
-        /// <summary>Fail the update as if it had created a duplicate.</summary>
-        public bool SideEffect { get; init; }
-
-        private string? _source;
 
         public ConfigMgrTransport Transport => ConfigMgrTransport.AdminService;
 
@@ -75,22 +51,7 @@ public class FallbackConnectionTests
 
         public Task UpdateImagePackageAsync(string packageId, string? version, string? description, string? sourcePath = null, CancellationToken cancellationToken = default)
         {
-            if (rejectUpdates)
-            {
-                throw new ConfigMgrException("HTTP 405");
-            }
-
-            if (SideEffect)
-            {
-                throw new ConfigMgrSideEffectException("created PS1000B3");
-            }
-
             Calls.Add($"update {packageId} {version} {sourcePath}");
-            if (!IgnoreSource)
-            {
-                _source = sourcePath ?? _source;
-            }
-
             return Task.CompletedTask;
         }
 
@@ -102,8 +63,7 @@ public class FallbackConnectionTests
 
         public Task<IReadOnlyList<ImagePackage>> GetImagePackagesAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
 
-        public Task<ImagePackage?> GetImagePackageAsync(string packageId, CancellationToken cancellationToken = default) =>
-            Task.FromResult<ImagePackage?>(new ImagePackage(packageId, "x", null, null, _source ?? @"\s\old.wim", null));
+        public Task<ImagePackage?> GetImagePackageAsync(string packageId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
 
         public Task<string> CreateImagePackageAsync(string name, string? version, string? description, string sourcePath, CancellationToken cancellationToken = default) => throw new NotSupportedException();
 

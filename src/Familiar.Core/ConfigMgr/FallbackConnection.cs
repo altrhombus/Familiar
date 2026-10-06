@@ -1,8 +1,9 @@
 namespace Familiar.Core.ConfigMgr;
 
 /// <summary>
-/// The administration service with WMI held in reserve for property updates, the one operation whose
-/// AdminService form is not documented. WMI is only opened if an update is rejected.
+/// The administration service for everything it supports, and WMI for property updates, which the administration
+/// service cannot do (tested on 2603: PATCH is not implemented and POST replaces the whole object). WMI is opened
+/// only when an update is needed.
 /// </summary>
 internal sealed class FallbackConnection(IConfigMgrConnection primary, Func<CancellationToken, Task<IConfigMgrConnection>> openFallback, Action<string> log)
     : IConfigMgrConnection
@@ -15,27 +16,17 @@ internal sealed class FallbackConnection(IConfigMgrConnection primary, Func<Canc
 
     public async Task UpdateImagePackageAsync(string packageId, string? version, string? description, string? sourcePath = null, CancellationToken cancellationToken = default)
     {
-        string reason;
-        try
+        if (version is null && description is null && sourcePath is null)
         {
-            await primary.UpdateImagePackageAsync(packageId, version, description, sourcePath, cancellationToken).ConfigureAwait(false);
-
-            // The update form is undocumented, so an accepted request is not proof; check the one change that matters.
-            var actual = sourcePath is null ? null : (await primary.GetImagePackageAsync(packageId, cancellationToken).ConfigureAwait(false))?.SourcePath;
-            if (sourcePath is null || string.Equals(actual, sourcePath, StringComparison.OrdinalIgnoreCase))
-            {
-                return;
-            }
-
-            reason = $"it accepted the update but the package still points at {actual}";
-        }
-        catch (ConfigMgrException ex) when (ex is not ConfigMgrSideEffectException)
-        {
-            reason = $"it rejected the update: {ex.Message}";
+            return;
         }
 
-        log($"The administration service did not update {packageId} ({reason}); retrying over WMI.");
-        _fallback ??= await openFallback(cancellationToken).ConfigureAwait(false);
+        if (_fallback is null)
+        {
+            log("Updating package properties over WMI (the administration service cannot update properties).");
+            _fallback = await openFallback(cancellationToken).ConfigureAwait(false);
+        }
+
         await _fallback.UpdateImagePackageAsync(packageId, version, description, sourcePath, cancellationToken).ConfigureAwait(false);
     }
 

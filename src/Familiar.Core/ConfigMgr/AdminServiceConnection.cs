@@ -9,8 +9,8 @@ namespace Familiar.Core.ConfigMgr;
 /// Talks to the SMS Provider through the administration service's WMI route
 /// (<c>https://provider/AdminService/wmi/</c>) with Windows authentication. Microsoft documents GET and POST on
 /// this route, with queries and static methods as examples. Creating instances (POST to the class) and instance
-/// methods (<c>Class('key')/AdminService.Method</c>) are not documented but work on 2603; property updates are a
-/// POST with the key in the body and fall back to WMI if the site rejects them.
+/// methods (<c>Class('key')/AdminService.Method</c>) are not documented but work on 2603. Updating properties does
+/// not work (see <see cref="UpdateImagePackageAsync"/>).
 /// </summary>
 public sealed class AdminServiceConnection : IConfigMgrConnection
 {
@@ -98,80 +98,18 @@ public sealed class AdminServiceConnection : IConfigMgrConnection
         return match?.PackageId ?? throw new ConfigMgrException("The site accepted the new image package but it could not be found afterwards.");
     }
 
+    /// <summary>Not supported: the administration service has no way to change some properties of an object.</summary>
     /// <remarks>
-    /// The WMI route only supports GET and POST; PATCH returns NotImplemented (seen on 2603). An update is a POST to
-    /// the class with the key property in the body, which the provider treats as a put of the existing instance.
-    /// That form is community-documented rather than Microsoft-documented, so callers verify the result and fall
-    /// back to WMI.
+    /// Tested on 2603: PATCH on the WMI route returns NotImplemented, and POST with the key replaces the whole
+    /// object with the fields sent (the site rejected it for an empty Name). Sending the full object back could lose
+    /// lazy properties, so property updates go over WMI instead; see <see cref="ConfigMgrConnector"/>.
     /// </remarks>
-    public async Task UpdateImagePackageAsync(string packageId, string? version, string? description, string? sourcePath = null, CancellationToken cancellationToken = default)
-    {
-        var body = new JsonObject();
-        if (version is not null)
-        {
-            body["Version"] = version;
-        }
-
-        if (description is not null)
-        {
-            body["Description"] = description;
-        }
-
-        if (sourcePath is not null)
-        {
-            body["PkgSourcePath"] = sourcePath;
-        }
-
-        if (body.Count == 0)
-        {
-            return;
-        }
-
-        var id = ConfigMgrIds.Package(packageId);
-        var before = await GetImagePackageAsync(id, cancellationToken).ConfigureAwait(false)
-            ?? throw new ConfigMgrException($"OS image package {id} was not found.");
-        var idsBefore = (await GetImagePackagesAsync(cancellationToken).ConfigureAwait(false)).Select(p => p.PackageId).ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-        body["PackageID"] = id;
-        await SendAsync(HttpMethod.Post, "SMS_ImagePackage", body, cancellationToken).ConfigureAwait(false);
-
-        // The POST form is undocumented: it could have created a new package or replaced the object, blanking
-        // fields that were not sent. Check for both before anyone relies on it.
-        var after = await GetImagePackagesAsync(cancellationToken).ConfigureAwait(false);
-        var problems = new List<string>();
-
-        var added = after.Where(p => !idsBefore.Contains(p.PackageId)).ToList();
-        if (added.Count > 0)
-        {
-            problems.Add($"a new image package appeared ({string.Join(", ", added.Select(p => $"{p.PackageId} \"{p.Name}\""))}); if it duplicates {id}, delete it in the console");
-        }
-
-        var updated = after.FirstOrDefault(p => string.Equals(p.PackageId, id, StringComparison.OrdinalIgnoreCase));
-        if (updated is null)
-        {
-            problems.Add($"{id} is no longer listed");
-        }
-        else
-        {
-            Compare("Name", before.Name, updated.Name, requested: null);
-            Compare("Version", before.Version, updated.Version, version);
-            Compare("Description", before.Description, updated.Description, description);
-        }
-
-        if (problems.Count > 0)
-        {
-            throw new ConfigMgrSideEffectException($"The administration service update of {id} had side effects: {string.Join("; ", problems)}. Fix these in the console before publishing again.");
-        }
-
-        void Compare(string property, string? previous, string? current, string? requested)
-        {
-            var expected = requested ?? previous;
-            if (!string.Equals(expected ?? string.Empty, current ?? string.Empty, StringComparison.Ordinal))
-            {
-                problems.Add($"{property} is \"{current}\", expected \"{expected}\"");
-            }
-        }
-    }
+    public Task UpdateImagePackageAsync(string packageId, string? version, string? description, string? sourcePath = null, CancellationToken cancellationToken = default) =>
+        version is null && description is null && sourcePath is null
+            ? Task.CompletedTask
+            : throw new ConfigMgrException(
+                "The administration service cannot update package properties (PATCH is not implemented and POST replaces the whole object). "
+                + "Use transport Auto or Wmi, which update over WMI.");
 
     public Task ReloadImagePropertiesAsync(string packageId, CancellationToken cancellationToken = default) =>
         SendAsync(HttpMethod.Post, $"SMS_ImagePackage('{ConfigMgrIds.Package(packageId)}')/AdminService.ReloadImageProperties", new JsonObject(), cancellationToken);

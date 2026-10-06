@@ -65,54 +65,27 @@ public class AdminServiceConnectionTests
     [Fact]
     public async Task UnsupportedOperation_SaysSo()
     {
-        var site = new SimulatedSite(PostBehavior.Reject);
-        await using var connection = await Connect(new FakeHandler(site.Respond));
+        var handler = new FakeHandler(r => r.Method == "GET" ? Json("""{ "value": [ { "SiteCode": "PS1" } ] }""") : new HttpResponseMessage(HttpStatusCode.MethodNotAllowed));
+        await using var connection = await Connect(handler);
 
         var ex = await Assert.ThrowsAsync<ConfigMgrException>(() =>
-            connection.UpdateImagePackageAsync("PS1000B2", "2", null, cancellationToken: TestContext.Current.CancellationToken));
+            connection.ReloadImagePropertiesAsync("PS1000B2", TestContext.Current.CancellationToken));
 
         Assert.Contains("does not support the operation", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
-    public async Task UpdateImagePackage_PostsToTheClassWithTheKey()
+    public async Task UpdateImagePackage_IsRefusedWithoutSendingAnything()
     {
-        var site = new SimulatedSite(PostBehavior.Merge);
-        var handler = new FakeHandler(site.Respond);
+        // On 2603, PATCH is not implemented and POST replaces the whole object, so no update request is ever sent.
+        var handler = new FakeHandler(_ => Json("""{ "value": [ { "SiteCode": "PS1" } ] }"""));
         await using var connection = await Connect(handler);
 
-        await connection.UpdateImagePackageAsync("ps1000b2", "2026.10.06", null, @"\\s\Images\25H2_AMD64_2610_2\install.wim", TestContext.Current.CancellationToken);
-
-        var update = handler.Requests.Single(r => r.Method == "POST");
-        Assert.Equal("https://cm01.contoso.com/AdminService/wmi/SMS_ImagePackage", update.Uri);
-        Assert.Equal("""{"Version":"2026.10.06","PkgSourcePath":"\\\\s\\Images\\25H2_AMD64_2610_2\\install.wim","PackageID":"PS1000B2"}""", update.Body);
-        Assert.Equal(@"\\s\Images\25H2_AMD64_2610_2\install.wim", site.Packages["PS1000B2"]["PkgSourcePath"]!.GetValue<string>());
-    }
-
-    [Fact]
-    public async Task UpdateThatCreatesADuplicate_FailsAndNamesIt()
-    {
-        var site = new SimulatedSite(PostBehavior.Create);
-        await using var connection = await Connect(new FakeHandler(site.Respond));
-
-        var ex = await Assert.ThrowsAsync<ConfigMgrSideEffectException>(() =>
+        var ex = await Assert.ThrowsAsync<ConfigMgrException>(() =>
             connection.UpdateImagePackageAsync("PS1000B2", null, null, @"\\s\new.wim", TestContext.Current.CancellationToken));
 
-        Assert.Contains("PS1000B3", ex.Message, StringComparison.Ordinal);
-        Assert.Contains("delete it", ex.Message, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public async Task UpdateThatBlanksUnsentFields_Fails()
-    {
-        var site = new SimulatedSite(PostBehavior.Replace);
-        await using var connection = await Connect(new FakeHandler(site.Respond));
-
-        var ex = await Assert.ThrowsAsync<ConfigMgrSideEffectException>(() =>
-            connection.UpdateImagePackageAsync("PS1000B2", null, null, @"\\s\new.wim", TestContext.Current.CancellationToken));
-
-        Assert.Contains("Name is \"\", expected \"Familiar Test\"", ex.Message, StringComparison.Ordinal);
-        Assert.Contains("Description", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("Use transport Auto or Wmi", ex.Message, StringComparison.Ordinal);
+        Assert.Single(handler.Requests);
     }
 
     [Fact]
@@ -145,70 +118,6 @@ public class AdminServiceConnectionTests
 
     private static HttpResponseMessage Json(string body, HttpStatusCode status = HttpStatusCode.OK) =>
         new(status) { Content = new StringContent(body, Encoding.UTF8, "application/json") };
-
-    private enum PostBehavior
-    {
-        Merge,
-        Create,
-        Replace,
-        Reject,
-    }
-
-    /// <summary>One image package and the ways a site might interpret a POST with its key.</summary>
-    private sealed class SimulatedSite(PostBehavior behavior)
-    {
-        public Dictionary<string, System.Text.Json.Nodes.JsonObject> Packages { get; } = new(StringComparer.OrdinalIgnoreCase)
-        {
-            ["PS1000B2"] = new()
-            {
-                ["PackageID"] = "PS1000B2",
-                ["Name"] = "Familiar Test",
-                ["Version"] = "1",
-                ["Description"] = "Safe to delete.",
-                ["PkgSourcePath"] = @"\\s\old.wim",
-            },
-        };
-
-        public HttpResponseMessage Respond(Request request)
-        {
-            if (request.Uri.Contains("SMS_Site", StringComparison.Ordinal))
-            {
-                return Json("""{ "value": [ { "SiteCode": "PS1" } ] }""");
-            }
-
-            if (request.Method == "GET")
-            {
-                var values = new System.Text.Json.Nodes.JsonArray(Packages.Values.Select(p => (System.Text.Json.Nodes.JsonNode)p.DeepClone()).ToArray());
-                return Json(new System.Text.Json.Nodes.JsonObject { ["value"] = values }.ToJsonString());
-            }
-
-            var body = System.Text.Json.Nodes.JsonNode.Parse(request.Body!)!.AsObject();
-            var id = body["PackageID"]!.GetValue<string>();
-            switch (behavior)
-            {
-                case PostBehavior.Reject:
-                    return new HttpResponseMessage(HttpStatusCode.MethodNotAllowed);
-                case PostBehavior.Create:
-                    var copy = (System.Text.Json.Nodes.JsonObject)body.DeepClone();
-                    copy["PackageID"] = "PS1000B3";
-                    copy["Name"] = "";
-                    Packages["PS1000B3"] = copy;
-                    break;
-                case PostBehavior.Replace:
-                    Packages[id] = (System.Text.Json.Nodes.JsonObject)body.DeepClone();
-                    break;
-                default:
-                    foreach (var (key, value) in body)
-                    {
-                        Packages[id][key] = value?.DeepClone();
-                    }
-
-                    break;
-            }
-
-            return Json("{}");
-        }
-    }
 
     private sealed record Request(string Method, string Uri, string? Body);
 
