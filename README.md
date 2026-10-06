@@ -59,7 +59,7 @@ longer maintained.
 4. ~~Updates: LCU, checkpoint CUs and .NET from a folder; WinRE patched with the Safe OS Dynamic Update~~; still to do: Setup Dynamic Update for install media
 5. ~~Re-provisioning inbox apps from the Inbox Apps ISO~~; still to do: boot.wim and `lang.ini` for install media
 6. Drivers, .NET 3.5, provisioned app removal, registry files, custom scripts
-7. ~~Configuration Manager: create/update OS image packages, distribute content~~ (needs a run against a real site); still to do: ConfigMgr as an update source
+7. ~~Configuration Manager: create/update OS image packages, distribute content~~ (needs a run against a real site); still to do: ConfigMgr as an update source; publishing with other credentials than the signed-in account
 8. ~~Update downloads from the Microsoft Update Catalog~~
 9. ISO creation (`oscdimg` from the ADK)
 10. Autopilot JSON drop-in
