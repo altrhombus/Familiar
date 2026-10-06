@@ -101,7 +101,11 @@ public sealed class BuildRunner(
 
         if (recipe.ConfigMgr is { } configMgr)
         {
-            warnings.AddRange(await PublishAsync(recipe, configMgr, recipe.Output.Path, connectConfigMgr, progress, log, cancellationToken).ConfigureAwait(false));
+            // Feed {release} and {arch} in the source folder template; the source image's release is the output's.
+            var releaseName = catalog?.Resolve(info.ProductVersion.Build, info.InstallationType)?.Version
+                ?? info.ProductVersion.Build.ToString(CultureInfo.InvariantCulture);
+            warnings.AddRange(await PublishAsync(recipe, configMgr, recipe.Output.Path, releaseName, info.Architecture.ToString().ToUpperInvariant(),
+                connectConfigMgr, progress, log, cancellationToken).ConfigureAwait(false));
         }
 
         return new BuildResult(recipe.Output.Path, warnings);
@@ -112,6 +116,8 @@ public sealed class BuildRunner(
         BuildRecipe recipe,
         ConfigMgrSection section,
         string wimPath,
+        string? release,
+        string? architecture,
         Func<ConfigMgrSection, Action<string>, CancellationToken, Task<IConfigMgrConnection>>? connect,
         IProgress<ServicingProgress>? progress,
         Action<string> log,
@@ -134,6 +140,9 @@ public sealed class BuildRunner(
                 DistributionPointGroups = section.DistributionPointGroups,
                 DistributionPoints = section.DistributionPoints,
                 RefreshDistributionPoints = section.RefreshDistributionPoints,
+                SourceFolderName = section.SourceFolderName,
+                Release = release,
+                Architecture = architecture,
             };
 
             var result = await new ConfigMgrPublisher(connection).PublishAsync(wimPath, request, progress, log, cancellationToken).ConfigureAwait(false);

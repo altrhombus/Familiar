@@ -126,6 +126,81 @@ public sealed class ConfigMgrPublisherTests : IDisposable
     }
 
     [Fact]
+    public async Task VersionedFolders_UpdateCopiesBesideAndRepointsThePackage()
+    {
+        var images = Path.Combine(_root, "Images", "Windows 11");
+        var current = Path.Combine(images, "25H2_AMD64_2601_1", "Windows11-25H2-Enterprise.wim");
+        Directory.CreateDirectory(Path.GetDirectoryName(current)!);
+        File.WriteAllBytes(current, [9]);
+        var site = new FakeSite { Existing = new ImagePackage("PS1000A1", "Windows 11 25H2 Enterprise AMD64", "1", null, current, null) };
+
+        var result = await new ConfigMgrPublisher(site).PublishAsync(_wim, new ConfigMgrPublishRequest
+        {
+            PackageId = "PS1000A1",
+            Name = "x",
+            Version = "2026.10.06",
+            SourceFolderName = "{release}_{arch}_{date:yyMM}_{n}",
+            Release = "25H2",
+            Architecture = "AMD64",
+        }, cancellationToken: TestContext.Current.CancellationToken);
+
+        var expected = Path.Combine(images, $"25H2_AMD64_{DateTime.Now:yyMM}_1", "Windows11-25H2-Enterprise.wim");
+        Assert.Equal([1, 2, 3, 4], File.ReadAllBytes(expected));
+        Assert.Equal([9], File.ReadAllBytes(current));
+        Assert.Equal(current, result.PreviousImagePath);
+        Assert.Equal(["update PS1000A1 2026.10.06 source=" + expected, "reload PS1000A1", "refresh PS1000A1"], site.Calls);
+        Assert.False(File.Exists(current + ".previous"));
+    }
+
+    [Fact]
+    public async Task VersionedFolders_RollbackRepointsAtTheReplacedFolder()
+    {
+        var images = Path.Combine(_root, "Images");
+        var current = Path.Combine(images, "25H2_AMD64_2601_1", "install.wim");
+        Directory.CreateDirectory(Path.GetDirectoryName(current)!);
+        File.WriteAllBytes(current, [9]);
+        var site = new FakeSite { Existing = new ImagePackage("PS1000A1", "x", "1", null, current, null) };
+        var publisher = new ConfigMgrPublisher(site);
+        await publisher.PublishAsync(_wim, new ConfigMgrPublishRequest { PackageId = "PS1000A1", Name = "x", SourceFolderName = "{date:yyMMdd}.{n}" },
+            cancellationToken: TestContext.Current.CancellationToken);
+        var published = site.Existing.SourcePath!;
+        site.Calls.Clear();
+
+        await publisher.RollbackAsync("PS1000A1", cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Equal(current, site.Existing.SourcePath);
+        Assert.True(File.Exists(published), "the rolled-back folder is left in place");
+        Assert.Equal(["update PS1000A1  source=" + current, "reload PS1000A1", "refresh PS1000A1"], site.Calls);
+    }
+
+    [Fact]
+    public async Task VersionedFolders_FailedRepoint_SaysWhereTheCopyWent()
+    {
+        var current = Path.Combine(_root, "Images", "a", "install.wim");
+        var site = new FakeSite { Existing = new ImagePackage("PS1000A1", "x", "1", null, current, null), RejectUpdates = true };
+
+        var ex = await Assert.ThrowsAsync<ConfigMgrException>(() => new ConfigMgrPublisher(site).PublishAsync(_wim,
+            new ConfigMgrPublishRequest { PackageId = "PS1000A1", Name = "x", SourceFolderName = "b.{n}" },
+            cancellationToken: TestContext.Current.CancellationToken));
+
+        Assert.Contains("still points at", ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("reload PS1000A1", site.Calls);
+    }
+
+    [Fact]
+    public async Task VersionedFolders_NewPackageGoesIntoAFolderUnderTheSourcePath()
+    {
+        var site = new FakeSite();
+        var root = Path.Combine(_root, "Familiar-Test");
+
+        await new ConfigMgrPublisher(site).PublishAsync(_wim,
+            new ConfigMgrPublishRequest { Name = "Familiar Test", PackageSourcePath = root, SourceFolderName = "{release}_{arch}_{n}", Release = "25H2", Architecture = "AMD64" },
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.True(File.Exists(Path.Combine(root, "25H2_AMD64_1", "install-25h2.wim")));
+    }
+
+    [Fact]
     public async Task VersionUpdateRejected_IsAWarningNotAFailure()
     {
         var source = Path.Combine(_root, "install.wim");
@@ -164,7 +239,7 @@ public sealed class ConfigMgrPublisherTests : IDisposable
 
     private sealed class FakeSite : IConfigMgrConnection
     {
-        public ImagePackage? Existing { get; init; }
+        public ImagePackage? Existing { get; set; }
 
         public bool RejectUpdates { get; init; }
 
@@ -188,14 +263,19 @@ public sealed class ConfigMgrPublisherTests : IDisposable
             return Task.FromResult("PS100200");
         }
 
-        public Task UpdateImagePackageAsync(string packageId, string? version, string? description, CancellationToken cancellationToken = default)
+        public Task UpdateImagePackageAsync(string packageId, string? version, string? description, string? sourcePath = null, CancellationToken cancellationToken = default)
         {
             if (RejectUpdates)
             {
                 throw new ConfigMgrException("PATCH not supported");
             }
 
-            Calls.Add($"update {packageId} {version}");
+            Calls.Add(sourcePath is null ? $"update {packageId} {version}" : $"update {packageId} {version} source={sourcePath}");
+            if (sourcePath is not null && Existing is not null)
+            {
+                Existing = Existing with { SourcePath = sourcePath };
+            }
+
             return Task.CompletedTask;
         }
 

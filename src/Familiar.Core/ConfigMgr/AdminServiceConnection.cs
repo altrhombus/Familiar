@@ -98,7 +98,7 @@ public sealed class AdminServiceConnection : IConfigMgrConnection
         return match?.PackageId ?? throw new ConfigMgrException("The site accepted the new image package but it could not be found afterwards.");
     }
 
-    public async Task UpdateImagePackageAsync(string packageId, string? version, string? description, CancellationToken cancellationToken = default)
+    public async Task UpdateImagePackageAsync(string packageId, string? version, string? description, string? sourcePath = null, CancellationToken cancellationToken = default)
     {
         var body = new JsonObject();
         if (version is not null)
@@ -109,6 +109,11 @@ public sealed class AdminServiceConnection : IConfigMgrConnection
         if (description is not null)
         {
             body["Description"] = description;
+        }
+
+        if (sourcePath is not null)
+        {
+            body["PkgSourcePath"] = sourcePath;
         }
 
         if (body.Count > 0)

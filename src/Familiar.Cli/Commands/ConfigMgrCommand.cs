@@ -104,7 +104,13 @@ internal static class ConfigMgrCommand
         var recipePath = new Argument<FileInfo>("recipe") { Description = "Recipe whose output and configMgr section to use." };
         var wim = new Option<FileInfo?>("--wim") { Description = "Publish this WIM instead of the recipe's output.path." };
 
-        var command = new Command("publish", "Publish an already-built image to Configuration Manager.") { recipePath, wim };
+        var command = new Command("publish", "Publish an already-built image to Configuration Manager.")
+        {
+            recipePath,
+            wim,
+            CatalogOptions.Offline,
+            CatalogOptions.Refresh,
+        };
 
         command.SetAction(async (parseResult, cancellationToken) =>
         {
@@ -132,10 +138,35 @@ internal static class ConfigMgrCommand
             }
 
             var progress = new ConsoleProgress();
+            var path = parseResult.GetValue(wim)?.FullName ?? recipe.Output.Path;
+
+            // {release} and {arch} come from the image itself, which takes the DISM API (and so elevation) to read.
+            string? release = null;
+            string? architecture = null;
+            if (section.SourceFolderName is { } template && SourceFolderTemplate.NeedsImageDetails(template))
+            {
+                if (!Familiar.Core.ProcessElevation.IsElevated)
+                {
+                    Console.Error.WriteLine("The source folder template uses {release} or {arch}, which are read from the image with DISM; run from an elevated prompt.");
+                    return ExitCodes.NotElevated;
+                }
+
+                if (!File.Exists(path))
+                {
+                    Console.Error.WriteLine($"Nothing to publish: {path} does not exist.");
+                    return ExitCodes.NotFound;
+                }
+
+                var catalog = await CatalogOptions.LoadAsync(parseResult, cancellationToken);
+                using var dism = new Familiar.Core.Images.DismHost();
+                var index = dism.GetIndexes(path)[0];
+                release = catalog.Resolve(index.Version.Build, index.InstallationType)?.Version ?? index.Version.Build.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                architecture = index.Architecture.ToUpperInvariant();
+            }
+
             try
             {
-                var path = parseResult.GetValue(wim)?.FullName ?? recipe.Output.Path;
-                var warnings = await BuildRunner.PublishAsync(recipe, section, path, connect: null, progress, progress.Log, cancellationToken);
+                var warnings = await BuildRunner.PublishAsync(recipe, section, path, release, architecture, connect: null, progress, progress.Log, cancellationToken);
                 foreach (var warning in warnings)
                 {
                     progress.Log($"warning: {warning}");

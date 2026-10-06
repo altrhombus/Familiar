@@ -16,7 +16,10 @@ public static class ConfigMgrConnector
         {
             try
             {
-                return await AdminServiceConnection.ConnectAsync(AdminServiceConnection.CreateClient(siteServer), siteCode, ownsClient: true, cancellationToken).ConfigureAwait(false);
+                var adminService = await AdminServiceConnection.ConnectAsync(AdminServiceConnection.CreateClient(siteServer), siteCode, ownsClient: true, cancellationToken).ConfigureAwait(false);
+                return transport == ConfigMgrTransport.AdminService
+                    ? adminService
+                    : new FallbackConnection(adminService, async ct => await WmiConnection.ConnectAsync(siteServer, adminService.SiteCode, ct).ConfigureAwait(false), log);
             }
             catch (Exception ex) when (ex is HttpRequestException or ConfigMgrException or TaskCanceledException && !cancellationToken.IsCancellationRequested)
             {

@@ -69,7 +69,7 @@ public class AdminServiceConnectionTests
         await using var connection = await Connect(handler);
 
         var ex = await Assert.ThrowsAsync<ConfigMgrException>(() =>
-            connection.UpdateImagePackageAsync("PS100123", "2", null, TestContext.Current.CancellationToken));
+            connection.UpdateImagePackageAsync("PS100123", "2", null, cancellationToken: TestContext.Current.CancellationToken));
 
         Assert.Contains("does not support the operation", ex.Message, StringComparison.Ordinal);
         Assert.Equal("PATCH", handler.Requests[1].Method);

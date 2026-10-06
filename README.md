@@ -39,6 +39,8 @@ longer maintained.
   PowerShell module on the build machine. Updating an existing package changes what its task sequences
   deploy, so point recipes at a test package first: the replaced WIM is kept as `.previous` for
   `familiar configmgr rollback`, and `refreshDistributionPoints: false` holds the new image back from DPs.
+  Sites that keep a folder per build can set `sourceFolderName` (e.g. `{release}_{arch}_{date:yyMM}_{n}`):
+  each publish gets a new folder, the package is repointed, and rollback points it back.
 - **Inbox apps follow the languages.** Apps already in the image are re-provisioned from the Inbox Apps ISO so
   their bundles add resources for newly added languages. Dependencies come from each app's own manifest.
 - **Updates downloaded for you.** The latest cumulative update comes from the release data; Familiar finds it

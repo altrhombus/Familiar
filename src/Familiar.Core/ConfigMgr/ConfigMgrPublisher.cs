@@ -27,7 +27,46 @@ public sealed record ConfigMgrPublishRequest
     /// updates them (console: Update Distribution Points), which leaves room to test first.
     /// </summary>
     public bool RefreshDistributionPoints { get; init; } = true;
+
+    /// <summary>
+    /// Folder-name template (see <see cref="SourceFolderTemplate"/>). When set, every publish goes into a new folder
+    /// under <see cref="PackageSourcePath"/> (for updates, beside the current folder unless that is set) and existing
+    /// packages are repointed; when null, new packages go straight into PackageSourcePath and updates overwrite.
+    /// </summary>
+    public string? SourceFolderName { get; init; }
+
+    /// <summary>Value for {release} in <see cref="SourceFolderName"/>, e.g. 25H2.</summary>
+    public string? Release { get; init; }
+
+    /// <summary>Value for {arch} in <see cref="SourceFolderName"/>, e.g. AMD64.</summary>
+    public string? Architecture { get; init; }
 }
+
+/// <summary>Written into each versioned folder so rollback knows which source it replaced.</summary>
+internal sealed record PublishRecord(string PackageId, string PreviousSourcePath, DateTimeOffset PublishedAt)
+{
+    public const string FileName = "familiar-publish.json";
+
+    public static void Write(string folder, PublishRecord record) =>
+        File.WriteAllText(Path.Combine(folder, FileName), System.Text.Json.JsonSerializer.Serialize(record, PublishRecordJsonContext.Default.PublishRecord));
+
+    public static PublishRecord? Read(string folder)
+    {
+        var path = Path.Combine(folder, FileName);
+        try
+        {
+            return File.Exists(path) ? System.Text.Json.JsonSerializer.Deserialize(File.ReadAllText(path), PublishRecordJsonContext.Default.PublishRecord) : null;
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return null;
+        }
+    }
+}
+
+[System.Text.Json.Serialization.JsonSourceGenerationOptions(WriteIndented = true, PropertyNamingPolicy = System.Text.Json.Serialization.JsonKnownNamingPolicy.CamelCase)]
+[System.Text.Json.Serialization.JsonSerializable(typeof(PublishRecord))]
+internal sealed partial class PublishRecordJsonContext : System.Text.Json.Serialization.JsonSerializerContext;
 
 /// <param name="PreviousImagePath">Where the replaced WIM was kept, when an existing package was updated.</param>
 public sealed record ConfigMgrPublishResult(string PackageId, bool Created, string? PreviousImagePath, IReadOnlyList<string> Warnings);
@@ -73,25 +112,51 @@ public sealed class ConfigMgrPublisher(IConfigMgrConnection connection)
 
             log($"Updating OS image package {package.PackageId} ({package.Name}); source {package.SourcePath}");
 
-            // Task sequences deploy whatever the package source holds, so keep the replaced image for rollback.
-            if (File.Exists(package.SourcePath))
+            if (request.SourceFolderName is { } template)
             {
-                previous = PreviousImagePath(package.SourcePath);
-                log($"Keeping the current image as {previous}");
-                File.Copy(package.SourcePath, previous, overwrite: true);
-            }
+                // Versioned folders: copy beside the current one, then repoint the package. The old folder is the rollback.
+                var parent = request.PackageSourcePath ?? Path.GetDirectoryName(Path.GetDirectoryName(package.SourcePath))!;
+                var folder = SourceFolderTemplate.Expand(template, parent, request.Release, request.Architecture, DateTime.Now);
+                var target = Path.Combine(folder, Path.GetFileName(package.SourcePath));
 
-            await CopyAsync(wimPath, package.SourcePath, progress, cancellationToken).ConfigureAwait(false);
+                log($"Copying image to {target}");
+                await CopyAsync(wimPath, target, progress, cancellationToken).ConfigureAwait(false);
+                PublishRecord.Write(folder, new PublishRecord(package.PackageId, package.SourcePath, DateTimeOffset.Now));
 
-            if (request.Version is not null || request.Description is not null)
-            {
+                log($"Pointing {package.PackageId} at {target}");
                 try
                 {
-                    await connection.UpdateImagePackageAsync(package.PackageId, request.Version, request.Description, cancellationToken).ConfigureAwait(false);
+                    await connection.UpdateImagePackageAsync(package.PackageId, request.Version, request.Description, target, cancellationToken).ConfigureAwait(false);
                 }
                 catch (ConfigMgrException ex)
                 {
-                    warnings.Add($"Version and description were not updated: {ex.Message}");
+                    throw new ConfigMgrException($"The image was copied to {target}, but {package.PackageId} still points at {package.SourcePath}: {ex.Message}", ex);
+                }
+
+                previous = package.SourcePath;
+            }
+            else
+            {
+                // In place: task sequences deploy whatever the package source holds, so keep the replaced image for rollback.
+                if (File.Exists(package.SourcePath))
+                {
+                    previous = PreviousImagePath(package.SourcePath);
+                    log($"Keeping the current image as {previous}");
+                    File.Copy(package.SourcePath, previous, overwrite: true);
+                }
+
+                await CopyAsync(wimPath, package.SourcePath, progress, cancellationToken).ConfigureAwait(false);
+
+                if (request.Version is not null || request.Description is not null)
+                {
+                    try
+                    {
+                        await connection.UpdateImagePackageAsync(package.PackageId, request.Version, request.Description, cancellationToken: cancellationToken).ConfigureAwait(false);
+                    }
+                    catch (ConfigMgrException ex)
+                    {
+                        warnings.Add($"Version and description were not updated: {ex.Message}");
+                    }
                 }
             }
 
@@ -100,8 +165,11 @@ public sealed class ConfigMgrPublisher(IConfigMgrConnection connection)
         }
         else
         {
-            var folder = request.PackageSourcePath
+            var root = request.PackageSourcePath
                 ?? throw new ConfigMgrException("configMgr.packageSourcePath is required to create a new OS image package.");
+            var folder = request.SourceFolderName is { } template
+                ? SourceFolderTemplate.Expand(template, root, request.Release, request.Architecture, DateTime.Now)
+                : root;
             var target = Path.Combine(folder, Path.GetFileName(wimPath));
 
             log($"Copying image to {target}");
@@ -157,8 +225,10 @@ public sealed class ConfigMgrPublisher(IConfigMgrConnection connection)
     }
 
     /// <summary>
-    /// Restores the image kept by the last update of <paramref name="packageId"/>, reloads image properties and
-    /// refreshes distribution points. The rolled-back image is kept as <c>.rejected</c> for inspection.
+    /// Undoes the last update of <paramref name="packageId"/>, then reloads image properties and refreshes
+    /// distribution points. Versioned-folder updates point the package back at the folder they replaced (the new
+    /// folder is left in place); in-place updates restore the <c>.previous</c> image and keep the rolled-back one
+    /// as <c>.rejected</c>.
     /// </summary>
     public async Task RollbackAsync(string packageId, Action<string>? log = null, CancellationToken cancellationToken = default)
     {
@@ -166,19 +236,34 @@ public sealed class ConfigMgrPublisher(IConfigMgrConnection connection)
         var package = await connection.GetImagePackageAsync(packageId, cancellationToken).ConfigureAwait(false)
             ?? throw new ConfigMgrException($"OS image package {packageId} was not found on site {connection.SiteCode}.");
         var source = package.SourcePath ?? throw new ConfigMgrException($"OS image package {packageId} has no source path.");
-        var previous = PreviousImagePath(source);
-        if (!File.Exists(previous))
-        {
-            throw new ConfigMgrException($"No previous image to roll back to ({previous} does not exist).");
-        }
 
-        log($"Restoring {previous} to {source}");
-        if (File.Exists(source))
+        if (PublishRecord.Read(Path.GetDirectoryName(source)!) is { PackageId: var recorded, PreviousSourcePath: var earlier }
+            && string.Equals(recorded, package.PackageId, StringComparison.OrdinalIgnoreCase))
         {
-            File.Move(source, source + ".rejected", overwrite: true);
-        }
+            if (!File.Exists(earlier))
+            {
+                throw new ConfigMgrException($"The image this update replaced is gone ({earlier} does not exist).");
+            }
 
-        File.Move(previous, source);
+            log($"Pointing {package.PackageId} back at {earlier}");
+            await connection.UpdateImagePackageAsync(package.PackageId, version: null, description: null, earlier, cancellationToken).ConfigureAwait(false);
+        }
+        else
+        {
+            var previous = PreviousImagePath(source);
+            if (!File.Exists(previous))
+            {
+                throw new ConfigMgrException($"No previous image to roll back to: {source} was not published by Familiar into a versioned folder, and {previous} does not exist.");
+            }
+
+            log($"Restoring {previous} to {source}");
+            if (File.Exists(source))
+            {
+                File.Move(source, source + ".rejected", overwrite: true);
+            }
+
+            File.Move(previous, source);
+        }
 
         log($"Reloading image properties for {package.PackageId}");
         await connection.ReloadImagePropertiesAsync(package.PackageId, cancellationToken).ConfigureAwait(false);

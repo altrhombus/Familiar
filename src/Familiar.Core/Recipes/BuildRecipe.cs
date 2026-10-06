@@ -61,6 +61,13 @@ public sealed record ConfigMgrSection
     /// <summary>UNC folder the WIM is copied to for a new package, e.g. \\cm01\Sources$\OSD\Win11-25H2.</summary>
     public string? PackageSourcePath { get; init; }
 
+    /// <summary>
+    /// Give every publish its own folder, named from a template such as <c>{release}_{arch}_{date:yyMM}_{n}</c>
+    /// (25H2_AMD64_2610_1). Existing packages are repointed at the new folder and the old one is left as it was,
+    /// which is what rollback returns to. Omit to copy into packageSourcePath and update packages in place.
+    /// </summary>
+    public string? SourceFolderName { get; init; }
+
     /// <summary>Package name for new packages; defaults to the recipe name.</summary>
     public string? PackageName { get; init; }
 

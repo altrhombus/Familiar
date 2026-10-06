@@ -68,7 +68,7 @@ public sealed class WmiConnection : IConfigMgrConnection
                 ?? throw new ConfigMgrException("The site created the image package but did not return its PackageID.");
         }, cancellationToken);
 
-    public Task UpdateImagePackageAsync(string packageId, string? version, string? description, CancellationToken cancellationToken = default) =>
+    public Task UpdateImagePackageAsync(string packageId, string? version, string? description, string? sourcePath = null, CancellationToken cancellationToken = default) =>
         Run(() =>
         {
             using var instance = Single($"SELECT * FROM SMS_ImagePackage WHERE PackageID = '{ConfigMgrIds.Package(packageId)}'");
@@ -80,6 +80,11 @@ public sealed class WmiConnection : IConfigMgrConnection
             if (description is not null)
             {
                 instance.CimInstanceProperties["Description"].Value = description;
+            }
+
+            if (sourcePath is not null)
+            {
+                instance.CimInstanceProperties["PkgSourcePath"].Value = sourcePath;
             }
 
             _session.ModifyInstance(_namespace, instance);
