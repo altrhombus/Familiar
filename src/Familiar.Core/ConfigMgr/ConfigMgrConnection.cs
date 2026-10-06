@@ -66,4 +66,10 @@ public interface IConfigMgrConnection : IAsyncDisposable
 }
 
 /// <summary>A site rejected or could not complete a request.</summary>
-public sealed class ConfigMgrException(string message, Exception? inner = null) : Exception(message, inner);
+public class ConfigMgrException(string message, Exception? inner = null) : Exception(message, inner);
+
+/// <summary>
+/// A request changed more than intended (for example created a duplicate package). Never retried another way:
+/// the site needs a person to look at it first.
+/// </summary>
+public sealed class ConfigMgrSideEffectException(string message) : ConfigMgrException(message);

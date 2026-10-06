@@ -29,7 +29,7 @@ internal sealed class FallbackConnection(IConfigMgrConnection primary, Func<Canc
 
             reason = $"it accepted the update but the package still points at {actual}";
         }
-        catch (ConfigMgrException ex)
+        catch (ConfigMgrException ex) when (ex is not ConfigMgrSideEffectException)
         {
             reason = $"it rejected the update: {ex.Message}";
         }

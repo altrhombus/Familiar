@@ -36,6 +36,16 @@ public class FallbackConnectionTests
     }
 
     [Fact]
+    public async Task SideEffects_AreNotRetriedOverWmi()
+    {
+        var primary = new Recorder(rejectUpdates: false) { SideEffect = true };
+        await using var connection = new FallbackConnection(primary, _ => throw new InvalidOperationException("should not open"), _ => { });
+
+        await Assert.ThrowsAsync<ConfigMgrSideEffectException>(() =>
+            connection.UpdateImagePackageAsync("PS1000B2", null, null, @"\\s\new.wim", TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
     public async Task OtherOperations_StayOnThePrimary()
     {
         var primary = new Recorder(rejectUpdates: false);
@@ -54,6 +64,9 @@ public class FallbackConnectionTests
         /// <summary>Accept updates without applying the source path, like a site ignoring an unsupported form.</summary>
         public bool IgnoreSource { get; init; }
 
+        /// <summary>Fail the update as if it had created a duplicate.</summary>
+        public bool SideEffect { get; init; }
+
         private string? _source;
 
         public ConfigMgrTransport Transport => ConfigMgrTransport.AdminService;
@@ -65,6 +78,11 @@ public class FallbackConnectionTests
             if (rejectUpdates)
             {
                 throw new ConfigMgrException("HTTP 405");
+            }
+
+            if (SideEffect)
+            {
+                throw new ConfigMgrSideEffectException("created PS1000B3");
             }
 
             Calls.Add($"update {packageId} {version} {sourcePath}");
