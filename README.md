@@ -35,8 +35,9 @@ longer maintained.
   data.
 - **Configuration Manager without the console.** Builds publish straight to an OS image package: copy to the
   package source, create or update, reload image properties, distribute or refresh. The AdminService (REST)
-  is tried first and WMI to the SMS Provider is the fallback; neither needs the ConfigMgr console or
-  PowerShell module on the build machine. Updating an existing package changes what its task sequences
+  handles reads, creates and method calls; property updates (such as repointing a package) go over WMI,
+  because the AdminService cannot update properties (tested on 2603). WMI is also the fallback when the
+  AdminService is unreachable. Neither needs the ConfigMgr console or PowerShell module on the build machine. Updating an existing package changes what its task sequences
   deploy, so point recipes at a test package first: the replaced WIM is kept as `.previous` for
   `familiar configmgr rollback`, and `refreshDistributionPoints: false` holds the new image back from DPs.
   Sites that keep a folder per build can set `sourceFolderName` (e.g. `{release}_{arch}_{date:yyMM}_{n}`):
