@@ -12,11 +12,13 @@ public sealed class WmiConnection : IConfigMgrConnection
     private const string Wql = "WQL";
 
     private readonly CimSession _session;
+    private readonly string _siteServer;
     private readonly string _namespace;
 
-    private WmiConnection(CimSession session, string siteCode)
+    private WmiConnection(CimSession session, string siteServer, string siteCode)
     {
         _session = session;
+        _siteServer = siteServer;
         SiteCode = siteCode;
         _namespace = $@"root\SMS\site_{siteCode}";
     }
@@ -38,7 +40,7 @@ public sealed class WmiConnection : IConfigMgrConnection
                     .FirstOrDefault(c => !string.IsNullOrEmpty(c))
                     ?? throw new ConfigMgrException($"{siteServer} does not host an SMS Provider.");
 
-                return new WmiConnection(session, ConfigMgrIds.SiteCode(code));
+                return new WmiConnection(session, siteServer, ConfigMgrIds.SiteCode(code));
             }
             catch (CimException ex)
             {
@@ -68,27 +70,43 @@ public sealed class WmiConnection : IConfigMgrConnection
                 ?? throw new ConfigMgrException("The site created the image package but did not return its PackageID.");
         }, cancellationToken);
 
+    /// <remarks>
+    /// Uses System.Management rather than MI: get the whole object by key, change it, and put the whole object
+    /// back, the pattern the ConfigMgr SDK uses. An MI ModifyInstance over DCOM was accepted by a real site
+    /// without the new PkgSourcePath taking effect.
+    /// </remarks>
     public Task UpdateImagePackageAsync(string packageId, string? version, string? description, string? sourcePath = null, CancellationToken cancellationToken = default) =>
-        Run(() =>
+        Task.Run(() =>
         {
-            using var instance = Single($"SELECT * FROM SMS_ImagePackage WHERE PackageID = '{ConfigMgrIds.Package(packageId)}'");
-            if (version is not null)
+            try
             {
-                instance.CimInstanceProperties["Version"].Value = version;
-            }
+                var scope = new System.Management.ManagementScope($@"\\{_siteServer}\{_namespace}");
+                scope.Connect();
+                using var package = new System.Management.ManagementObject(
+                    scope, new System.Management.ManagementPath($"SMS_ImagePackage.PackageID='{ConfigMgrIds.Package(packageId)}'"), null);
+                package.Get();
 
-            if (description is not null)
+                if (version is not null)
+                {
+                    package["Version"] = version;
+                }
+
+                if (description is not null)
+                {
+                    package["Description"] = description;
+                }
+
+                if (sourcePath is not null)
+                {
+                    package["PkgSourcePath"] = sourcePath;
+                }
+
+                package.Put();
+            }
+            catch (Exception ex) when (ex is System.Management.ManagementException or UnauthorizedAccessException or System.Runtime.InteropServices.COMException)
             {
-                instance.CimInstanceProperties["Description"].Value = description;
+                throw new ConfigMgrException($"WMI update of {packageId} failed: {ex.Message}", ex);
             }
-
-            if (sourcePath is not null)
-            {
-                instance.CimInstanceProperties["PkgSourcePath"].Value = sourcePath;
-            }
-
-            _session.ModifyInstance(_namespace, instance);
-            return true;
         }, cancellationToken);
 
     public Task ReloadImagePropertiesAsync(string packageId, CancellationToken cancellationToken = default) =>

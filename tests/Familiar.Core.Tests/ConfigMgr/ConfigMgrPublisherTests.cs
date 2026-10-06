@@ -188,6 +188,24 @@ public sealed class ConfigMgrPublisherTests : IDisposable
     }
 
     [Fact]
+    public async Task VersionedFolders_UpdateAcceptedButNotApplied_FailsInsteadOfReportingSuccess()
+    {
+        // What a real site did: the update call succeeded, yet PkgSourcePath did not change.
+        var current = Path.Combine(_root, "Images", "25H2_AMD64_2610_1", "install.wim");
+        Directory.CreateDirectory(Path.GetDirectoryName(current)!);
+        File.WriteAllBytes(current, [9]);
+        var site = new FakeSite { Existing = new ImagePackage("PS1000B2", "x", "1", null, current, null), IgnoreSourceUpdates = true };
+
+        var ex = await Assert.ThrowsAsync<ConfigMgrException>(() => new ConfigMgrPublisher(site).PublishAsync(_wim,
+            new ConfigMgrPublishRequest { PackageId = "PS1000B2", Name = "x", SourceFolderName = "25H2_AMD64_2610_{n}" },
+            cancellationToken: TestContext.Current.CancellationToken));
+
+        Assert.Contains("still points at", ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("reload PS1000B2", site.Calls);
+        Assert.DoesNotContain("refresh PS1000B2", site.Calls);
+    }
+
+    [Fact]
     public async Task VersionedFolders_NewPackageGoesIntoAFolderUnderTheSourcePath()
     {
         var site = new FakeSite();
@@ -243,6 +261,9 @@ public sealed class ConfigMgrPublisherTests : IDisposable
 
         public bool RejectUpdates { get; init; }
 
+        /// <summary>Accept source path updates without applying them.</summary>
+        public bool IgnoreSourceUpdates { get; init; }
+
         public List<string> Calls { get; } = [];
 
         public List<string> Targets { get; } = [];
@@ -271,7 +292,7 @@ public sealed class ConfigMgrPublisherTests : IDisposable
             }
 
             Calls.Add(sourcePath is null ? $"update {packageId} {version}" : $"update {packageId} {version} source={sourcePath}");
-            if (sourcePath is not null && Existing is not null)
+            if (sourcePath is not null && Existing is not null && !IgnoreSourceUpdates)
             {
                 Existing = Existing with { SourcePath = sourcePath };
             }

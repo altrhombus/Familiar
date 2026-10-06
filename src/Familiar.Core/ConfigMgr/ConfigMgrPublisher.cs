@@ -133,6 +133,9 @@ public sealed class ConfigMgrPublisher(IConfigMgrConnection connection)
                     throw new ConfigMgrException($"The image was copied to {target}, but {package.PackageId} still points at {package.SourcePath}: {ex.Message}", ex);
                 }
 
+                // A site can accept an update without applying it; never report a repoint that did not happen.
+                await VerifySourceAsync(package.PackageId, target, cancellationToken).ConfigureAwait(false);
+
                 previous = package.SourcePath;
             }
             else
@@ -247,6 +250,7 @@ public sealed class ConfigMgrPublisher(IConfigMgrConnection connection)
 
             log($"Pointing {package.PackageId} back at {earlier}");
             await connection.UpdateImagePackageAsync(package.PackageId, version: null, description: null, earlier, cancellationToken).ConfigureAwait(false);
+            await VerifySourceAsync(package.PackageId, earlier, cancellationToken).ConfigureAwait(false);
         }
         else
         {
@@ -269,6 +273,16 @@ public sealed class ConfigMgrPublisher(IConfigMgrConnection connection)
         await connection.ReloadImagePropertiesAsync(package.PackageId, cancellationToken).ConfigureAwait(false);
         log("Refreshing distribution points");
         await connection.RefreshDistributionPointsAsync(package.PackageId, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task VerifySourceAsync(string packageId, string expected, CancellationToken cancellationToken)
+    {
+        var actual = (await connection.GetImagePackageAsync(packageId, cancellationToken).ConfigureAwait(false))?.SourcePath;
+        if (!string.Equals(actual, expected, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ConfigMgrException(
+                $"The site accepted the change, but {packageId} still points at {actual ?? "nothing"} instead of {expected}. Nothing else was changed.");
+        }
     }
 
     /// <summary>Where the replaced image is kept: beside the source, under a name the package does not reference.</summary>
