@@ -82,6 +82,21 @@ packages and distribute content, and write access to the package source share.
 The simplest arrangement is to sign in to the build machine as that account and use *Run as administrator*.
 _(Running elevated as a different account than the signed-in one: to verify.)_
 
+Before the machine is domain-joined, `familiar doctor --recipe` reports the ConfigMgr checks like this, which is
+expected:
+
+```text
+ConfigMgr
+  [WARN] Administration service: HTTPS certificate not trusted by this machine.
+  [FAIL] WMI (SMS Provider): Could not reach the SMS Provider on <server> over WMI: Access is denied.
+```
+
+- **Certificate not trusted**: the machine doesn't trust the SMS Provider's HTTPS certificate. Joining the domain
+  fixes this when the certificate comes from your enterprise PKI. If the site uses ConfigMgr's self-signed
+  certificate, import it into the machine's Trusted Root store, or let Familiar use WMI.
+- **Access is denied** (WMI): the signed-in account has no rights on the site. Join the domain and sign in as the
+  ConfigMgr account.
+
 ## 6. Network
 
 | Destination | Why | Without it |

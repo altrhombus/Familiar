@@ -112,7 +112,7 @@ public sealed class LanguagePlannerTests : IDisposable
     {
         var plan = LanguagePlanner.PlanImage(Request("de-CH", "de-DE"), _media);
 
-        Assert.Contains(plan.Warnings, w => w.StartsWith("de-CH has no language pack of its own; it displays with de-DE", StringComparison.Ordinal));
+        Assert.Contains(plan.Warnings, w => w.StartsWith("de-CH has no language pack of its own", StringComparison.Ordinal) && w.Contains("German language pack (de-DE)", StringComparison.Ordinal));
         Assert.Contains("Language.Basic~~~de-CH~0.0.1.0", Capabilities(plan));
     }
 
@@ -123,7 +123,7 @@ public sealed class LanguagePlannerTests : IDisposable
 
         var plan = LanguagePlanner.PlanImage(Request("de-CH"), _media, state);
 
-        Assert.Contains(plan.Warnings, w => w.Contains("displays with de-DE", StringComparison.Ordinal));
+        Assert.Contains(plan.Warnings, w => w.Contains("German language pack (de-DE)", StringComparison.Ordinal));
     }
 
     [Fact]
