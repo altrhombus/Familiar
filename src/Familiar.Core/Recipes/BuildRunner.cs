@@ -378,10 +378,18 @@ public sealed class BuildRunner(
                 return warnings;
             }
 
+            // One line per language: each brings a language pack plus a package per installed WinPE component.
             log($"Localizing WinRE ({plan.Actions.Count} packages)");
+            string? current = null;
             foreach (var action in plan.Actions)
             {
-                log($"  {action.Description}");
+                var tag = action.Description[(action.Description.LastIndexOf(' ') + 1)..];
+                if (tag != current)
+                {
+                    current = tag;
+                    log($"  {tag}: {plan.Actions.Count(a => a.Description.EndsWith(" " + tag, StringComparison.Ordinal))} packages");
+                }
+
                 await recovery.ApplyAsync(action, progress, cancellationToken).ConfigureAwait(false);
             }
 
@@ -402,12 +410,23 @@ public sealed class BuildRunner(
         var compacted = Path.Combine(work, "winre-final.wim");
         await Run(_dism.ExportImageAsync(workWinRE, 1, compacted, progress: progress, cancellationToken: cancellationToken)).ConfigureAwait(false);
 
+        var before = new FileInfo(winRE).Length;
+        var after = new FileInfo(compacted).Length;
+        log($"WinRE: {Megabytes(before)} MB before, {Megabytes(after)} MB after localizing");
+        if (after > before)
+        {
+            // Deployed devices keep WinRE on the recovery partition; if it doesn't fit, Windows disables recovery.
+            warnings = [.. warnings, $"Localizing grew WinRE from {Megabytes(before)} MB to {Megabytes(after)} MB. Make sure the recovery partition your deployment creates has room for it."];
+        }
+
         var attributes = File.GetAttributes(winRE);
         File.SetAttributes(winRE, FileAttributes.Normal);
         File.Copy(compacted, winRE, overwrite: true);
         File.SetAttributes(winRE, attributes);
         return warnings;
     }
+
+    private static long Megabytes(long bytes) => (bytes + (1 << 20) - 1) >> 20;
 
     // Any language pack on the media carries the build it was made for.
     private static async Task<int?> ReadMediaBuildAsync(LanguageMedia media, CancellationToken cancellationToken)

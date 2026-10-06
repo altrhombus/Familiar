@@ -1,7 +1,7 @@
 # Setting up a build machine
 
-> **Draft.** Written before the first clean-machine walkthrough. Steps marked _(to verify)_ are assumptions
-> that walkthrough will confirm or correct.
+> **Draft.** Sections 1–4 and 7 are verified on a clean Windows Server 2025 VM. Steps marked _(to verify)_ are
+> still assumptions; the domain-join and publishing steps are next.
 
 A build machine mounts Windows images, services them with DISM, and (optionally) publishes them to
 Configuration Manager. It needs very little installed, but its **environment** matters: Defender policy, disk
@@ -61,16 +61,19 @@ Download from the Volume Licensing Service Center (or Visual Studio subscription
 - *Languages and Optional Features* for the matching servicing baseline (24H2/25H2 share one)
 - *Inbox Apps* for the release
 
-Copy them to the data disk. Recipes can point at a mounted ISO or a copied folder; copied folders keep their
-paths when drive letters change, which mounted ISOs don't _(recommended layout to settle in the walkthrough)_:
+Either attach the ISOs to the machine (DVD drives on a VM, or *Mount* on a physical machine) or copy their
+contents to the data disk. Attached ISOs are simplest; copied folders keep their paths if drive letters change.
+Verified layout on the walkthrough VM:
 
 ```text
-D:\Familiar\Media\Win11-25H2\                  (contents of the install ISO)
-D:\Familiar\Media\LanguagesAndOptionalFeatures-24H2\
-D:\Familiar\Media\InboxApps-25H2\
-D:\Familiar\Updates\Windows11-25H2-x64\
-D:\Familiar\Work\                                (workingDirectory)
-D:\Familiar\Recipes\
+E:\                                      Windows 11 25H2 install ISO
+F:\                                      Languages and Optional Features ISO
+G:\                                      Inbox Apps ISO
+I:\Familiar\familiar.exe
+I:\Familiar\Recipes\
+I:\Familiar\Updates\Windows11-25H2-x64\   (downloaded updates; kept between builds)
+I:\Familiar\Work\                         (workingDirectory; emptied after each build)
+I:\Familiar\Output\
 ```
 
 ## 5. Account
@@ -116,6 +119,12 @@ familiar recipe check D:\Familiar\Recipes\25h2-production.json
 familiar build D:\Familiar\Recipes\25h2-production.json --dism-log D:\Familiar\Work\dism.log
 familiar info D:\Familiar\Output\Windows11-25H2-Enterprise.wim
 ```
+
+On the walkthrough VM, a 25H2 Enterprise build with 16 languages, 46 inbox apps, the latest cumulative update
+and the .NET update took about **70 minutes**; the cumulative update alone took about 25.
+
+Languages added to WinRE make it larger. The build logs WinRE's size before and after, and warns when it grew;
+check it against the recovery partition your task sequence creates, or recovery is disabled on deployed devices.
 
 `info` should show the latest cumulative update before you publish. Publishing refuses an image older than the
 package's current build unless the recipe sets `allowOlderImage`.
