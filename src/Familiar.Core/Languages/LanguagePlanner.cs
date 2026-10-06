@@ -71,7 +71,12 @@ public static class LanguagePlanner
             }
             else if (!hasPack)
             {
-                warnings.Add($"{tag} has no language pack on the media; only typing and input features are added. The display language comes from a Local Experience Pack.");
+                // Regional variants (de-CH, en-CA, es-US) display with their parent language's pack. On Windows 11,
+                // .appx Local Experience Packs cannot be added to an image, so with no parent the UI stays as is.
+                var parent = FindParentLanguage(tag, request.Languages, media, state);
+                warnings.Add(parent is not null
+                    ? $"{tag} has no language pack of its own; it displays with {parent} and adds its regional typing, speech and handwriting features."
+                    : $"{tag} has no language pack on the media, and none for its parent language is in the image or the request; only its typing and speech features are added. Users can add it as a display language from Settings.");
             }
 
             foreach (var feature in FeatureOrder)
@@ -159,6 +164,20 @@ public static class LanguagePlanner
         }
 
         return new ServicingPlan(actions, warnings, []);
+    }
+
+    /// <summary>A full language pack for the same language (en for en-CA) that is requested or already installed.</summary>
+    private static string? FindParentLanguage(string tag, IEnumerable<string> requested, LanguageMedia media, ImageLanguageState? state)
+    {
+        var language = tag.Split('-')[0];
+        bool SameLanguage(string other) =>
+            !string.Equals(other, tag, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(other.Split('-')[0], language, StringComparison.OrdinalIgnoreCase);
+
+        return requested.Select(LanguageTag.Normalize)
+                .Where(t => SameLanguage(t) && media.LanguagePacks.TryGetValue(t, out var p) && !p.IsInterfacePack)
+                .Concat(state?.InstalledLanguagePacks.Where(SameLanguage) ?? [])
+                .FirstOrDefault();
     }
 
     private static void AddCapability(

@@ -21,6 +21,7 @@ internal static class LanguageFixtures
         "Microsoft-Windows-LanguageFeatures-Basic-sr-latn-rs-Package~31bf3856ad364e35~amd64~~.cab",
         "Microsoft-Windows-LanguageFeatures-Basic-ca-es-Package~31bf3856ad364e35~amd64~~.cab",
         "Microsoft-Windows-LanguageFeatures-Basic-af-za-Package~31bf3856ad364e35~amd64~~.cab",
+        "Microsoft-Windows-LanguageFeatures-Basic-de-ch-Package~31bf3856ad364e35~amd64~~.cab",
         "Microsoft-Windows-LanguageFeatures-Basic-zh-cn-Package~31bf3856ad364e35~amd64~~.cab",
         "Microsoft-Windows-LanguageFeatures-Basic-zh-tw-Package~31bf3856ad364e35~amd64~~.cab",
         "Microsoft-Windows-LanguageFeatures-Fonts-Jpan-Package~31bf3856ad364e35~amd64~~.cab",

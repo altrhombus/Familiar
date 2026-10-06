@@ -101,11 +101,10 @@ public sealed class BuildRunner(
 
         if (recipe.ConfigMgr is { } configMgr)
         {
-            // Feed {release} and {arch} in the source folder template; the source image's release is the output's.
-            var releaseName = catalog?.Resolve(info.ProductVersion.Build, info.InstallationType)?.Version
-                ?? info.ProductVersion.Build.ToString(CultureInfo.InvariantCulture);
-            warnings.AddRange(await PublishAsync(recipe, configMgr, recipe.Output.Path, releaseName, info.Architecture.ToString().ToUpperInvariant(),
-                connectConfigMgr, progress, log, cancellationToken).ConfigureAwait(false));
+            // Facts come from the built output, so templates and the downgrade check describe what is actually published.
+            var facts = ImageFactsReader.Read(recipe.Output.Path, catalog);
+            log($"Built image: {facts.Release ?? "unknown release"} {facts.Edition} {facts.Architecture}, build {facts.Build}{(facts.Kb is null ? string.Empty : $" ({facts.Kb})")}");
+            warnings.AddRange(await PublishAsync(recipe, configMgr, recipe.Output.Path, facts, connectConfigMgr, progress, log, cancellationToken).ConfigureAwait(false));
         }
 
         return new BuildResult(recipe.Output.Path, warnings);
@@ -116,8 +115,7 @@ public sealed class BuildRunner(
         BuildRecipe recipe,
         ConfigMgrSection section,
         string wimPath,
-        string? release,
-        string? architecture,
+        ImageFacts? facts,
         Func<ConfigMgrSection, Action<string>, CancellationToken, Task<IConfigMgrConnection>>? connect,
         IProgress<ServicingProgress>? progress,
         Action<string> log,
@@ -129,22 +127,32 @@ public sealed class BuildRunner(
 
         try
         {
-            await using var connection = await connect(section, log, cancellationToken).ConfigureAwait(false);
+            var now = DateTime.Now;
+            string? Expand(string? template) => template is null ? null : PackageTemplate.Expand(template, facts, now);
+
+            // New packages need a name and get a dated version by default; existing ones change only what the recipe sets.
+            var isNew = section.PackageId is null;
             var request = new ConfigMgrPublishRequest
             {
                 PackageId = section.PackageId,
                 PackageSourcePath = section.PackageSourcePath,
-                Name = section.PackageName ?? recipe.Name ?? Path.GetFileNameWithoutExtension(wimPath),
-                // Existing packages keep their version unless the recipe sets one; new ones get the build date.
-                Version = section.Version ?? (section.PackageId is null ? DateTime.Now.ToString("yyyy.MM.dd", CultureInfo.InvariantCulture) : null),
-                Description = section.Description,
+                Name = Expand(section.PackageName) ?? (isNew ? recipe.Name ?? Path.GetFileNameWithoutExtension(wimPath) : null),
+                Version = Expand(section.Version) ?? (isNew ? now.ToString("yyyy.MM.dd", CultureInfo.InvariantCulture) : null),
+                Description = Expand(section.Description),
                 DistributionPointGroups = section.DistributionPointGroups,
                 DistributionPoints = section.DistributionPoints,
                 RefreshDistributionPoints = section.RefreshDistributionPoints,
                 SourceFolderName = section.SourceFolderName,
-                Release = release,
-                Architecture = architecture,
+                Image = facts,
+                AllowOlderImage = section.AllowOlderImage,
             };
+
+            if (request.Name is not null || request.Version is not null || request.Description is not null)
+            {
+                log($"Package fields: name \"{request.Name ?? "(unchanged)"}\", version \"{request.Version ?? "(unchanged)"}\", description \"{request.Description ?? "(unchanged)"}\"");
+            }
+
+            await using var connection = await connect(section, log, cancellationToken).ConfigureAwait(false);
 
             var result = await new ConfigMgrPublisher(connection).PublishAsync(wimPath, request, progress, log, cancellationToken).ConfigureAwait(false);
             return result.Warnings;

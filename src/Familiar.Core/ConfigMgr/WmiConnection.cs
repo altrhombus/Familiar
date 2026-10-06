@@ -75,7 +75,7 @@ public sealed class WmiConnection : IConfigMgrConnection
     /// back, the pattern the ConfigMgr SDK uses. An MI ModifyInstance over DCOM was accepted by a real site
     /// without the new PkgSourcePath taking effect.
     /// </remarks>
-    public Task UpdateImagePackageAsync(string packageId, string? version, string? description, string? sourcePath = null, CancellationToken cancellationToken = default) =>
+    public Task UpdateImagePackageAsync(string packageId, string? version, string? description, string? sourcePath = null, string? name = null, CancellationToken cancellationToken = default) =>
         Task.Run(() =>
         {
             try
@@ -99,6 +99,11 @@ public sealed class WmiConnection : IConfigMgrConnection
                 if (sourcePath is not null)
                 {
                     package["PkgSourcePath"] = sourcePath;
+                }
+
+                if (name is not null)
+                {
+                    package["Name"] = name;
                 }
 
                 package.Put();

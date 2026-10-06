@@ -13,8 +13,8 @@ public class FallbackConnectionTests
         var log = new List<string>();
         await using var connection = new FallbackConnection(primary, _ => { opened++; return Task.FromResult<IConfigMgrConnection>(wmi); }, log.Add);
 
-        await connection.UpdateImagePackageAsync("PS1000B2", "1", null, @"\\s\a.wim", TestContext.Current.CancellationToken);
-        await connection.UpdateImagePackageAsync("PS1000B2", "2", null, null, TestContext.Current.CancellationToken);
+        await connection.UpdateImagePackageAsync("PS1000B2", "1", null, @"\\s\a.wim", cancellationToken: TestContext.Current.CancellationToken);
+        await connection.UpdateImagePackageAsync("PS1000B2", "2", null, null, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(1, opened);
         Assert.Empty(primary.Calls);
@@ -27,7 +27,7 @@ public class FallbackConnectionTests
     {
         await using var connection = new FallbackConnection(new Recorder(), _ => throw new InvalidOperationException("should not open"), _ => { });
 
-        await connection.UpdateImagePackageAsync("PS1000B2", null, null, null, TestContext.Current.CancellationToken);
+        await connection.UpdateImagePackageAsync("PS1000B2", null, null, null, cancellationToken: TestContext.Current.CancellationToken);
     }
 
     [Fact]
@@ -49,7 +49,7 @@ public class FallbackConnectionTests
 
         public string SiteCode => "PS1";
 
-        public Task UpdateImagePackageAsync(string packageId, string? version, string? description, string? sourcePath = null, CancellationToken cancellationToken = default)
+        public Task UpdateImagePackageAsync(string packageId, string? version, string? description, string? sourcePath = null, string? name = null, CancellationToken cancellationToken = default)
         {
             Calls.Add($"update {packageId} {version} {sourcePath}");
             return Task.CompletedTask;

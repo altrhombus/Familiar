@@ -50,7 +50,7 @@ public interface IConfigMgrConnection : IAsyncDisposable
     Task<string> CreateImagePackageAsync(string name, string? version, string? description, string sourcePath, CancellationToken cancellationToken = default);
 
     /// <summary>Changes properties; null leaves a property as it is.</summary>
-    Task UpdateImagePackageAsync(string packageId, string? version, string? description, string? sourcePath = null, CancellationToken cancellationToken = default);
+    Task UpdateImagePackageAsync(string packageId, string? version, string? description, string? sourcePath = null, string? name = null, CancellationToken cancellationToken = default);
 
     /// <summary>Re-reads index, OS version and language details from the WIM at the package source.</summary>
     Task ReloadImagePropertiesAsync(string packageId, CancellationToken cancellationToken = default);

@@ -6,11 +6,12 @@ public class SourceFolderTemplateTests
 {
     private const string Parent = @"\\cm01\Source$\OSImages\Win11";
     private static readonly DateTime October = new(2026, 10, 6);
+    private static readonly ImageFacts Facts = new("25H2", "AMD64", "Enterprise", "26200.9457", "KB5129195", new DateOnly(2026, 9, 14));
 
     [Fact]
     public void Expand_MatchesTheReleaseArchDateCounterConvention()
     {
-        var path = SourceFolderTemplate.Expand("{release}_{arch}_{date:yyMM}_{n}", Parent, "25H2", "AMD64", October, _ => false);
+        var path = SourceFolderTemplate.Expand("{release}_{arch}_{date:yyMM}_{n}", Parent, Facts, October, _ => false);
 
         Assert.Equal(@"\\cm01\Source$\OSImages\Win11\25H2_AMD64_2610_1", path);
     }
@@ -20,7 +21,7 @@ public class SourceFolderTemplateTests
     {
         var taken = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { Parent + @"\25H2_AMD64_2610_1", Parent + @"\25H2_AMD64_2610_2" };
 
-        var path = SourceFolderTemplate.Expand("{release}_{arch}_{date:yyMM}_{n}", Parent, "25H2", "AMD64", October, taken.Contains);
+        var path = SourceFolderTemplate.Expand("{release}_{arch}_{date:yyMM}_{n}", Parent, Facts, October, taken.Contains);
 
         Assert.EndsWith(@"\25H2_AMD64_2610_3", path, StringComparison.Ordinal);
     }
@@ -28,13 +29,13 @@ public class SourceFolderTemplateTests
     [Fact]
     public void Expand_WithoutCounter_RefusesToReuseAFolder()
     {
-        Assert.Throws<ConfigMgrException>(() => SourceFolderTemplate.Expand("{date:yyyyMMdd}", Parent, null, null, October, _ => true));
+        Assert.Throws<ConfigMgrException>(() => SourceFolderTemplate.Expand("{date:yyyyMMdd}", Parent, null, October, _ => true));
     }
 
     [Fact]
     public void Expand_DefaultDateFormat()
     {
-        Assert.EndsWith(@"\2026.10.06", SourceFolderTemplate.Expand("{date}", Parent, null, null, October, _ => false), StringComparison.Ordinal);
+        Assert.EndsWith(@"\2026.10.06", SourceFolderTemplate.Expand("{date}", Parent, null, October, _ => false), StringComparison.Ordinal);
     }
 
     [Theory]
@@ -42,17 +43,17 @@ public class SourceFolderTemplateTests
     [InlineData("{arch}.{n}")]
     public void Expand_MissingImageDetails_Explains(string template)
     {
-        var ex = Assert.Throws<ConfigMgrException>(() => SourceFolderTemplate.Expand(template, Parent, null, null, October, _ => false));
+        var ex = Assert.Throws<ConfigMgrException>(() => SourceFolderTemplate.Expand(template, Parent, null, October, _ => false));
 
-        Assert.Contains("unknown", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("could not be determined", ex.Message, StringComparison.Ordinal);
     }
 
     [Theory]
-    [InlineData("{build}.{n}")]
+    [InlineData("{bogus}.{n}")]
     [InlineData("a/b{n}")]
     public void Expand_RejectsUnknownTokensAndInvalidNames(string template)
     {
-        Assert.Throws<ConfigMgrException>(() => SourceFolderTemplate.Expand(template, Parent, "25H2", "AMD64", October, _ => false));
+        Assert.Throws<ConfigMgrException>(() => SourceFolderTemplate.Expand(template, Parent, Facts, October, _ => false));
     }
 
     [Theory]
@@ -61,6 +62,6 @@ public class SourceFolderTemplateTests
     [InlineData("{date:yyMM}.{n}", false)]
     public void NeedsImageDetails(string template, bool expected)
     {
-        Assert.Equal(expected, SourceFolderTemplate.NeedsImageDetails(template));
+        Assert.Equal(expected, PackageTemplate.NeedsImageFacts(template));
     }
 }

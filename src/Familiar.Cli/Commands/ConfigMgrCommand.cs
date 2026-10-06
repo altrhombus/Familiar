@@ -141,13 +141,16 @@ internal static class ConfigMgrCommand
             var path = parseResult.GetValue(wim)?.FullName ?? recipe.Output.Path;
 
             // {release} and {arch} come from the image itself, which takes the DISM API (and so elevation) to read.
-            string? release = null;
-            string? architecture = null;
-            if (section.SourceFolderName is { } template && SourceFolderTemplate.NeedsImageDetails(template))
+            // Facts come from the image with DISM (so elevation): templates may use them, and updating an existing
+            // package always needs the build for the downgrade check.
+            ImageFacts? facts = null;
+            var needsFacts = section.PackageId is not null
+                || new[] { section.PackageName, section.Version, section.Description, section.SourceFolderName }.Any(PackageTemplate.NeedsImageFacts);
+            if (needsFacts)
             {
                 if (!Familiar.Core.ProcessElevation.IsElevated)
                 {
-                    Console.Error.WriteLine("The source folder template uses {release} or {arch}, which are read from the image with DISM; run from an elevated prompt.");
+                    Console.Error.WriteLine("Publishing reads the image's build and release with DISM (for templates and the downgrade check); run from an elevated prompt.");
                     return ExitCodes.NotElevated;
                 }
 
@@ -159,14 +162,13 @@ internal static class ConfigMgrCommand
 
                 var catalog = await CatalogOptions.LoadAsync(parseResult, cancellationToken);
                 using var dism = new Familiar.Core.Images.DismHost();
-                var index = dism.GetIndexes(path)[0];
-                release = catalog.Resolve(index.Version.Build, index.InstallationType)?.Version ?? index.Version.Build.ToString(System.Globalization.CultureInfo.InvariantCulture);
-                architecture = index.Architecture.ToUpperInvariant();
+                facts = ImageFactsReader.Read(path, catalog);
+                progress.Log($"Image: {facts.Release ?? "unknown release"} {facts.Edition} {facts.Architecture}, build {facts.Build}{(facts.Kb is null ? string.Empty : $" ({facts.Kb})")}");
             }
 
             try
             {
-                var warnings = await BuildRunner.PublishAsync(recipe, section, path, release, architecture, connect: null, progress, progress.Log, cancellationToken);
+                var warnings = await BuildRunner.PublishAsync(recipe, section, path, facts, connect: null, progress, progress.Log, cancellationToken);
                 foreach (var warning in warnings)
                 {
                     progress.Log($"warning: {warning}");

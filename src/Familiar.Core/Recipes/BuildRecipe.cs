@@ -68,13 +68,23 @@ public sealed record ConfigMgrSection
     /// </summary>
     public string? SourceFolderName { get; init; }
 
-    /// <summary>Package name for new packages; defaults to the recipe name.</summary>
+    // Name, version and description accept the tokens in ConfigMgr.PackageTemplate.TokenHelp, e.g.
+    // "Windows 11 {arch}", "{release}" or "{cu:yyyy-MM}". Existing packages change only the fields that are set.
+
+    /// <summary>Package name. New packages default to the recipe name; existing packages are renamed only when set.</summary>
     public string? PackageName { get; init; }
 
-    /// <summary>For new packages, defaults to the build date (yyyy.MM.dd). Existing packages keep theirs unless set.</summary>
+    /// <summary>Package version. New packages default to the build date (yyyy.MM.dd); existing ones keep theirs unless set.</summary>
     public string? Version { get; init; }
 
+    /// <summary>Package description (the console's comment). Changed only when set.</summary>
     public string? Description { get; init; }
+
+    /// <summary>
+    /// Allow publishing an image whose build is older than the one the existing package already has. Off by default,
+    /// so a skipped update or older media cannot roll deployments back.
+    /// </summary>
+    public bool AllowOlderImage { get; set; }
 
     public IReadOnlyList<string> DistributionPointGroups { get; set; } = [];
 

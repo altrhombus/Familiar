@@ -82,7 +82,7 @@ public class AdminServiceConnectionTests
         await using var connection = await Connect(handler);
 
         var ex = await Assert.ThrowsAsync<ConfigMgrException>(() =>
-            connection.UpdateImagePackageAsync("PS1000B2", null, null, @"\\s\new.wim", TestContext.Current.CancellationToken));
+            connection.UpdateImagePackageAsync("PS1000B2", null, null, @"\\s\new.wim", cancellationToken: TestContext.Current.CancellationToken));
 
         Assert.Contains("Use transport Auto or Wmi", ex.Message, StringComparison.Ordinal);
         Assert.Single(handler.Requests);
@@ -94,7 +94,7 @@ public class AdminServiceConnectionTests
         var handler = new FakeHandler(_ => Json("""{ "value": [ { "SiteCode": "PS1" } ] }"""));
         await using var connection = await Connect(handler);
 
-        await connection.UpdateImagePackageAsync("PS1000B2", null, null, null, TestContext.Current.CancellationToken);
+        await connection.UpdateImagePackageAsync("PS1000B2", null, null, null, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Single(handler.Requests);
     }

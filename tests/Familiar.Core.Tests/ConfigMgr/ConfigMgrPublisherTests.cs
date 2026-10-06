@@ -55,7 +55,6 @@ public sealed class ConfigMgrPublisherTests : IDisposable
         var result = await new ConfigMgrPublisher(site).PublishAsync(_wim, new ConfigMgrPublishRequest
         {
             PackageId = "PS100123",
-            Name = "ignored for updates",
             Version = "2026.10.05",
             DistributionPoints = ["dp01"],
         }, cancellationToken: TestContext.Current.CancellationToken);
@@ -137,11 +136,10 @@ public sealed class ConfigMgrPublisherTests : IDisposable
         var result = await new ConfigMgrPublisher(site).PublishAsync(_wim, new ConfigMgrPublishRequest
         {
             PackageId = "PS1000A1",
-            Name = "x",
+            
             Version = "2026.10.06",
             SourceFolderName = "{release}_{arch}_{date:yyMM}_{n}",
-            Release = "25H2",
-            Architecture = "AMD64",
+            Image = new ImageFacts("25H2", "AMD64", "Enterprise", "26200.9457", "KB5129195", new DateOnly(2026, 9, 14)),
         }, cancellationToken: TestContext.Current.CancellationToken);
 
         var expected = Path.Combine(images, $"25H2_AMD64_{DateTime.Now:yyMM}_1", "Windows11-25H2-Enterprise.wim");
@@ -212,7 +210,7 @@ public sealed class ConfigMgrPublisherTests : IDisposable
         var root = Path.Combine(_root, "Familiar-Test");
 
         await new ConfigMgrPublisher(site).PublishAsync(_wim,
-            new ConfigMgrPublishRequest { Name = "Familiar Test", PackageSourcePath = root, SourceFolderName = "{release}_{arch}_{n}", Release = "25H2", Architecture = "AMD64" },
+            new ConfigMgrPublishRequest { Name = "Familiar Test", PackageSourcePath = root, SourceFolderName = "{release}_{arch}_{n}", Image = new ImageFacts("25H2", "AMD64", "Enterprise", "26200.9457", null, null) },
             cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(File.Exists(Path.Combine(root, "25H2_AMD64_1", "install-25h2.wim")));
@@ -242,6 +240,59 @@ public sealed class ConfigMgrPublisherTests : IDisposable
 
         Assert.Contains(result.Warnings, w => w.Contains(expected, StringComparison.Ordinal));
         Assert.DoesNotContain("refresh PS1000A1", site.Calls);
+    }
+
+    [Fact]
+    public async Task OlderImage_IsRefusedBeforeAnythingIsCopied()
+    {
+        var current = Path.Combine(_root, "Images", "25H2_AMD64_2601_1", "Windows11-25H2-Enterprise.wim");
+        var site = new FakeSite { Existing = new ImagePackage("PS1000A1", "x", null, null, current, "10.0.26200.7628") };
+
+        var ex = await Assert.ThrowsAsync<ConfigMgrException>(() => new ConfigMgrPublisher(site).PublishAsync(_wim, new ConfigMgrPublishRequest
+        {
+            PackageId = "PS1000A1",
+            SourceFolderName = "25H2_AMD64_2610_{n}",
+            Image = new ImageFacts("25H2", "AMD64", "Enterprise", "26200.6584", "KB5065426", new DateOnly(2025, 9, 9)),
+        }, cancellationToken: TestContext.Current.CancellationToken));
+
+        Assert.Contains("older than the 26200.7628", ex.Message, StringComparison.Ordinal);
+        Assert.False(Directory.Exists(Path.Combine(_root, "Images", "25H2_AMD64_2610_1")));
+        Assert.Empty(site.Calls);
+    }
+
+    [Fact]
+    public async Task OlderImage_AllowedWhenAskedFor()
+    {
+        var current = Path.Combine(_root, "Images", "25H2_AMD64_2601_1", "install.wim");
+        var site = new FakeSite { Existing = new ImagePackage("PS1000A1", "x", null, null, current, "10.0.26200.7628") };
+
+        await new ConfigMgrPublisher(site).PublishAsync(_wim, new ConfigMgrPublishRequest
+        {
+            PackageId = "PS1000A1",
+            SourceFolderName = "25H2_AMD64_2610_{n}",
+            Image = new ImageFacts("25H2", "AMD64", "Enterprise", "26200.6584", null, null),
+            AllowOlderImage = true,
+        }, cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Contains("reload PS1000A1", site.Calls);
+    }
+
+    [Fact]
+    public async Task ExistingPackage_RenamedOnlyWhenNameIsSet()
+    {
+        var current = Path.Combine(_root, "Images", "a", "install.wim");
+        var site = new FakeSite { Existing = new ImagePackage("PS1000A1", "Windows 11 25H2 Enterprise AMD64", null, null, current, null) };
+
+        await new ConfigMgrPublisher(site).PublishAsync(_wim, new ConfigMgrPublishRequest
+        {
+            PackageId = "PS1000A1",
+            Name = "Windows 11 AMD64",
+            Version = "25H2",
+            Description = "2026-09",
+            SourceFolderName = "b.{n}",
+        }, cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Contains(site.Calls, c => c.StartsWith("update PS1000A1 25H2", StringComparison.Ordinal) && c.EndsWith("name=Windows 11 AMD64", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -313,14 +364,15 @@ public sealed class ConfigMgrPublisherTests : IDisposable
             return Task.FromResult("PS100200");
         }
 
-        public Task UpdateImagePackageAsync(string packageId, string? version, string? description, string? sourcePath = null, CancellationToken cancellationToken = default)
+        public Task UpdateImagePackageAsync(string packageId, string? version, string? description, string? sourcePath = null, string? name = null, CancellationToken cancellationToken = default)
         {
             if (RejectUpdates)
             {
                 throw new ConfigMgrException("PATCH not supported");
             }
 
-            Calls.Add(sourcePath is null ? $"update {packageId} {version}" : $"update {packageId} {version} source={sourcePath}");
+            Calls.Add((sourcePath is null ? $"update {packageId} {version}" : $"update {packageId} {version} source={sourcePath}")
+                + (name is null ? string.Empty : $" name={name}"));
             if (sourcePath is not null && Existing is not null && !IgnoreSourceUpdates)
             {
                 Existing = Existing with { SourcePath = sourcePath };

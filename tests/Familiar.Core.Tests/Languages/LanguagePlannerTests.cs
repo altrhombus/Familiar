@@ -108,6 +108,25 @@ public sealed class LanguagePlannerTests : IDisposable
     }
 
     [Fact]
+    public void PlanImage_RegionalVariant_NamesTheRequestedParent()
+    {
+        var plan = LanguagePlanner.PlanImage(Request("de-CH", "de-DE"), _media);
+
+        Assert.Contains(plan.Warnings, w => w.StartsWith("de-CH has no language pack of its own; it displays with de-DE", StringComparison.Ordinal));
+        Assert.Contains("Language.Basic~~~de-CH~0.0.1.0", Capabilities(plan));
+    }
+
+    [Fact]
+    public void PlanImage_RegionalVariant_NamesTheInstalledParent()
+    {
+        var state = new ImageLanguageState(new Dictionary<string, bool>(), new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "de-DE" });
+
+        var plan = LanguagePlanner.PlanImage(Request("de-CH"), _media, state);
+
+        Assert.Contains(plan.Warnings, w => w.Contains("displays with de-DE", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void PlanImage_UnknownLanguage_IsAnError()
     {
         var plan = LanguagePlanner.PlanImage(Request("de-DE", "xx-XX"), _media);

@@ -11,10 +11,13 @@ public sealed record ConfigMgrPublishRequest
     /// <summary>UNC folder for the package source. Required for new packages; for existing ones, overrides nothing.</summary>
     public string? PackageSourcePath { get; init; }
 
-    public required string Name { get; init; }
+    /// <summary>Package name: required for new packages; for existing ones, renames when set.</summary>
+    public string? Name { get; init; }
 
+    /// <summary>Package version; for existing packages, changed only when set.</summary>
     public string? Version { get; init; }
 
+    /// <summary>Package description (the console's comment); for existing packages, changed only when set.</summary>
     public string? Description { get; init; }
 
     public IReadOnlyList<string> DistributionPointGroups { get; init; } = [];
@@ -35,11 +38,14 @@ public sealed record ConfigMgrPublishRequest
     /// </summary>
     public string? SourceFolderName { get; init; }
 
-    /// <summary>Value for {release} in <see cref="SourceFolderName"/>, e.g. 25H2.</summary>
-    public string? Release { get; init; }
+    /// <summary>Facts about the image being published, for templates and the downgrade check.</summary>
+    public ImageFacts? Image { get; init; }
 
-    /// <summary>Value for {arch} in <see cref="SourceFolderName"/>, e.g. AMD64.</summary>
-    public string? Architecture { get; init; }
+    /// <summary>
+    /// Publish to an existing package even when the image is an older build than the package already has. Off by
+    /// default: a skipped or failed update, or older media, would otherwise roll deployments back.
+    /// </summary>
+    public bool AllowOlderImage { get; init; }
 }
 
 /// <summary>Written into each versioned folder so rollback knows which source it replaced.</summary>
@@ -114,11 +120,19 @@ public sealed class ConfigMgrPublisher(IConfigMgrConnection connection)
             log($"Updating OS image package {package.PackageId} ({package.Name}); source {package.SourcePath}");
             sourceVersionBefore = package.SourceVersion;
 
+            // Checked before anything is copied: replacing an image with an older build silently un-patches deployments.
+            if (IsOlder(request.Image?.Build, package.ImageOSVersion) is { } comparison && !request.AllowOlderImage)
+            {
+                throw new ConfigMgrException(
+                    $"The new image is build {comparison.New}, older than the {comparison.Current} in {package.PackageId}. "
+                    + "Check that updates were applied, or set configMgr.allowOlderImage to publish it anyway.");
+            }
+
             if (request.SourceFolderName is { } template)
             {
                 // Versioned folders: copy beside the current one, then repoint the package. The old folder is the rollback.
                 var parent = request.PackageSourcePath ?? Path.GetDirectoryName(Path.GetDirectoryName(package.SourcePath))!;
-                var folder = SourceFolderTemplate.Expand(template, parent, request.Release, request.Architecture, DateTime.Now);
+                var folder = SourceFolderTemplate.Expand(template, parent, request.Image, DateTime.Now);
                 var target = Path.Combine(folder, Path.GetFileName(package.SourcePath));
 
                 log($"Copying image to {target}");
@@ -128,7 +142,7 @@ public sealed class ConfigMgrPublisher(IConfigMgrConnection connection)
                 log($"Pointing {package.PackageId} at {target}");
                 try
                 {
-                    await connection.UpdateImagePackageAsync(package.PackageId, request.Version, request.Description, target, cancellationToken).ConfigureAwait(false);
+                    await connection.UpdateImagePackageAsync(package.PackageId, request.Version, request.Description, target, request.Name, cancellationToken).ConfigureAwait(false);
                 }
                 catch (ConfigMgrException ex)
                 {
@@ -152,11 +166,11 @@ public sealed class ConfigMgrPublisher(IConfigMgrConnection connection)
 
                 await CopyAsync(wimPath, package.SourcePath, progress, cancellationToken).ConfigureAwait(false);
 
-                if (request.Version is not null || request.Description is not null)
+                if (request.Version is not null || request.Description is not null || request.Name is not null)
                 {
                     try
                     {
-                        await connection.UpdateImagePackageAsync(package.PackageId, request.Version, request.Description, cancellationToken: cancellationToken).ConfigureAwait(false);
+                        await connection.UpdateImagePackageAsync(package.PackageId, request.Version, request.Description, name: request.Name, cancellationToken: cancellationToken).ConfigureAwait(false);
                     }
                     catch (ConfigMgrException ex)
                     {
@@ -173,15 +187,16 @@ public sealed class ConfigMgrPublisher(IConfigMgrConnection connection)
             var root = request.PackageSourcePath
                 ?? throw new ConfigMgrException("configMgr.packageSourcePath is required to create a new OS image package.");
             var folder = request.SourceFolderName is { } template
-                ? SourceFolderTemplate.Expand(template, root, request.Release, request.Architecture, DateTime.Now)
+                ? SourceFolderTemplate.Expand(template, root, request.Image, DateTime.Now)
                 : root;
             var target = Path.Combine(folder, Path.GetFileName(wimPath));
 
             log($"Copying image to {target}");
             await CopyAsync(wimPath, target, progress, cancellationToken).ConfigureAwait(false);
 
-            log($"Creating OS image package \"{request.Name}\"");
-            packageId = await connection.CreateImagePackageAsync(request.Name, request.Version, request.Description, target, cancellationToken).ConfigureAwait(false);
+            var name = request.Name ?? throw new ConfigMgrException("A name is required to create a new OS image package.");
+            log($"Creating OS image package \"{name}\"");
+            packageId = await connection.CreateImagePackageAsync(name, request.Version, request.Description, target, cancellationToken).ConfigureAwait(false);
             created = true;
         }
 
@@ -260,7 +275,7 @@ public sealed class ConfigMgrPublisher(IConfigMgrConnection connection)
             }
 
             log($"Pointing {package.PackageId} back at {earlier}");
-            await connection.UpdateImagePackageAsync(package.PackageId, version: null, description: null, earlier, cancellationToken).ConfigureAwait(false);
+            await connection.UpdateImagePackageAsync(package.PackageId, version: null, description: null, earlier, cancellationToken: cancellationToken).ConfigureAwait(false);
             await VerifySourceAsync(package.PackageId, earlier, cancellationToken).ConfigureAwait(false);
         }
         else
@@ -284,6 +299,18 @@ public sealed class ConfigMgrPublisher(IConfigMgrConnection connection)
         await connection.ReloadImagePropertiesAsync(package.PackageId, cancellationToken).ConfigureAwait(false);
         log("Refreshing distribution points");
         await connection.RefreshDistributionPointsAsync(package.PackageId, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Compares "26200.9457" with an ImageOSVersion like "10.0.26200.7628"; null unless the new one is older.</summary>
+    internal static (string New, string Current)? IsOlder(string? newBuild, string? currentImageVersion)
+    {
+        if (newBuild is null || currentImageVersion is null
+            || !Version.TryParse("10.0." + newBuild, out var candidate) || !Version.TryParse(currentImageVersion, out var current))
+        {
+            return null;
+        }
+
+        return candidate < current ? (newBuild, $"{current.Build}.{current.Revision}") : null;
     }
 
     private async Task VerifySourceAsync(string packageId, string expected, CancellationToken cancellationToken)

@@ -104,8 +104,8 @@ public sealed class AdminServiceConnection : IConfigMgrConnection
     /// object with the fields sent (the site rejected it for an empty Name). Sending the full object back could lose
     /// lazy properties, so property updates go over WMI instead; see <see cref="ConfigMgrConnector"/>.
     /// </remarks>
-    public Task UpdateImagePackageAsync(string packageId, string? version, string? description, string? sourcePath = null, CancellationToken cancellationToken = default) =>
-        version is null && description is null && sourcePath is null
+    public Task UpdateImagePackageAsync(string packageId, string? version, string? description, string? sourcePath = null, string? name = null, CancellationToken cancellationToken = default) =>
+        version is null && description is null && sourcePath is null && name is null
             ? Task.CompletedTask
             : throw new ConfigMgrException(
                 "The administration service cannot update package properties (PATCH is not implemented and POST replaces the whole object). "

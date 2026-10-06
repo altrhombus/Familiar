@@ -14,9 +14,9 @@ internal sealed class FallbackConnection(IConfigMgrConnection primary, Func<Canc
 
     public string SiteCode => primary.SiteCode;
 
-    public async Task UpdateImagePackageAsync(string packageId, string? version, string? description, string? sourcePath = null, CancellationToken cancellationToken = default)
+    public async Task UpdateImagePackageAsync(string packageId, string? version, string? description, string? sourcePath = null, string? name = null, CancellationToken cancellationToken = default)
     {
-        if (version is null && description is null && sourcePath is null)
+        if (version is null && description is null && sourcePath is null && name is null)
         {
             return;
         }
@@ -27,7 +27,7 @@ internal sealed class FallbackConnection(IConfigMgrConnection primary, Func<Canc
             _fallback = await openFallback(cancellationToken).ConfigureAwait(false);
         }
 
-        await _fallback.UpdateImagePackageAsync(packageId, version, description, sourcePath, cancellationToken).ConfigureAwait(false);
+        await _fallback.UpdateImagePackageAsync(packageId, version, description, sourcePath, name, cancellationToken).ConfigureAwait(false);
     }
 
     public Task<IReadOnlyList<ImagePackage>> GetImagePackagesAsync(CancellationToken cancellationToken = default) => primary.GetImagePackagesAsync(cancellationToken);

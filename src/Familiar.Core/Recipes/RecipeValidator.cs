@@ -71,6 +71,20 @@ public static class RecipeValidator
                 errors.Add($"configMgr.packageId '{id}' is not a PackageID (for example PS100123).");
             }
 
+            foreach (var (field, template, counter) in new[]
+            {
+                ("packageName", configMgr.PackageName, false),
+                ("version", configMgr.Version, false),
+                ("description", configMgr.Description, false),
+                ("sourceFolderName", configMgr.SourceFolderName, true),
+            })
+            {
+                if (template is not null)
+                {
+                    errors.AddRange(ConfigMgr.PackageTemplate.Validate(template, counter).Select(p => $"configMgr.{field}: {p}."));
+                }
+            }
+
             // The site server reads the package source, so it must be a share, not a path on this machine.
             if (configMgr.PackageSourcePath is { } source && !source.StartsWith(@"\\", StringComparison.Ordinal))
             {
