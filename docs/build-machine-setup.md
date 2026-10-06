@@ -19,7 +19,10 @@ space, network access, and the account it runs as cause more failed builds than 
 | Data disk | 150 GB+, NTFS, for the working directory, media and downloaded updates. A multi-language build with a cumulative update peaks near 100 GB. |
 | Domain | Joined, if you publish to ConfigMgr (Kerberos to the SMS Provider and the package source share). |
 
-A virtual machine works _(to verify on Hyper-V with Server 2025)_.
+A virtual machine works. Verified baseline: a clean Windows Server 2025 Standard VM (build 26100.33438) on
+Hyper-V, with nothing installed, passes every machine check in `familiar doctor` (elevated). DISM,
+`dism.exe` and `expand.exe` ship with Windows, and its DISM (26100) services 25H2 images, which share the
+24H2 servicing baseline.
 
 Keep the host's DISM recent: the build machine's DISM services images up to its own release reliably. For a
 newer Windows release than the host, install the [Windows ADK](https://learn.microsoft.com/windows-hardware/get-started/adk-install)
@@ -47,6 +50,8 @@ Familiar is one self-contained file; no .NET installation is needed.
 
 1. On a development machine, build it: `./eng/Publish-Cli.ps1` → `artifacts\familiar-win-x64\familiar.exe`.
 2. Copy it to the build machine, for example `D:\Familiar\familiar.exe`, and optionally add that folder to `PATH`.
+3. From an elevated prompt, run `familiar doctor`. On a clean machine every check should pass; anything else is
+   environment (Defender policy, disk, network) rather than something to install.
 
 ## 4. Media
 
