@@ -7,6 +7,7 @@
     <RootNamespace>Familiar.App</RootNamespace>
     <AssemblyName>Familiar</AssemblyName>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>..\..\assets\familiar.ico</ApplicationIcon>
     <Platforms>x64;ARM64</Platforms>
     <RuntimeIdentifiers>win-x64;win-arm64</RuntimeIdentifiers>
     <RuntimeIdentifier Condition="'$(RuntimeIdentifier)' == '' and '$(Platform)' == 'ARM64'">win-arm64</RuntimeIdentifier>
@@ -17,6 +18,12 @@
     <WindowsPackageType>None</WindowsPackageType>
     <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The window needs the icon as a file too: the taskbar and Alt+Tab use it, not the one embedded in the exe. -->
+    <Content Include="..\..\assets\familiar.ico" Link="Assets\Familiar.ico" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="Assets\TitleBarIcon.png" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.WindowsAppSDK" />

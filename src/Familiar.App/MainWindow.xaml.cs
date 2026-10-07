@@ -29,6 +29,7 @@ public sealed partial class MainWindow : Window
 
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(AppTitleBar);
+        AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "Familiar.ico"));
 
         ElevationBar.IsOpen = !ProcessElevation.IsElevated;
         Navigation.SelectedItem = Navigation.MenuItems[0];

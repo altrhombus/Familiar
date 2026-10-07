@@ -15,12 +15,21 @@
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
-        <Grid x:Name="AppTitleBar" Padding="16,0,0,0">
+        <StackPanel
+            x:Name="AppTitleBar"
+            Padding="16,0,0,0"
+            Orientation="Horizontal"
+            Spacing="12">
+            <Image
+                Width="16"
+                Height="16"
+                VerticalAlignment="Center"
+                Source="Assets/TitleBarIcon.png" />
             <TextBlock
                 VerticalAlignment="Center"
                 Style="{StaticResource CaptionTextBlockStyle}"
                 Text="Familiar" />
-        </Grid>
+        </StackPanel>
 
         <NavigationView
             x:Name="Navigation"

@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <defs>
+    <g id="cat">
+      <path d="M44 150 L50 62 Q52 54 60 58 L112 92 L144 92 L196 58 Q204 54 206 62 L212 150 Z"/>
+      <ellipse cx="128" cy="164" rx="90" ry="76"/>
+    </g>
+  </defs>
+
+  <g transform="translate(0 -19)">
+    <!-- sticker rim so the black cat reads on dark backgrounds -->
+    <g fill="#F3EEFF" stroke="#F3EEFF" stroke-width="16" stroke-linejoin="round">
+      <use href="#cat"/>
+    </g>
+
+    <!-- cat -->
+    <use href="#cat" fill="#17141F"/>
+    <path d="M60 74 L98 98 L64 118 Z" fill="#2E2838" stroke="#2E2838" stroke-width="6" stroke-linejoin="round"/>
+    <path d="M196 74 L158 98 L192 118 Z" fill="#2E2838" stroke="#2E2838" stroke-width="6" stroke-linejoin="round"/>
+
+    <!-- eyes -->
+    <ellipse cx="94" cy="166" rx="20" ry="22" fill="#FFCB47"/>
+    <ellipse cx="162" cy="166" rx="20" ry="22" fill="#FFCB47"/>
+    <ellipse cx="96" cy="168" rx="13" ry="17" fill="#17141F"/>
+    <ellipse cx="160" cy="168" rx="13" ry="17" fill="#17141F"/>
+    <circle cx="101" cy="159" r="5.5" fill="#FFFFFF"/>
+    <circle cx="165" cy="159" r="5.5" fill="#FFFFFF"/>
+    <circle cx="91" cy="176" r="2.5" fill="#FFFFFF"/>
+    <circle cx="155" cy="176" r="2.5" fill="#FFFFFF"/>
+
+    <!-- blush, nose, mouth -->
+    <ellipse cx="72" cy="196" rx="13" ry="7" fill="#FF8FB1" opacity="0.55"/>
+    <ellipse cx="184" cy="196" rx="13" ry="7" fill="#FF8FB1" opacity="0.55"/>
+    <path d="M121 190 Q128 186 135 190 Q130 197 128 197 Q126 197 121 190 Z" fill="#FF8FB1"/>
+    <path d="M116 202 Q122 209 128 202 Q134 209 140 202" fill="none" stroke="#6B6278" stroke-width="3.5" stroke-linecap="round"/>
+  </g>
+</svg>

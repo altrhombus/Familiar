@@ -5,6 +5,7 @@
     <TargetFramework>$(FamiliarTargetFramework)</TargetFramework>
     <RootNamespace>Familiar.Cli</RootNamespace>
     <AssemblyName>familiar</AssemblyName>
+    <ApplicationIcon>..\..\assets\familiar.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>

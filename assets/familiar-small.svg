@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <defs>
+    <path id="head" d="M3 21 C3 13 4 7 5 3.5 Q5.4 2.3 6.5 3 L12 7 Q16 6.2 20 7 L25.5 3 Q26.6 2.3 27 3.5 C28 7 29 13 29 21 C29 26.5 23 29.5 16 29.5 C9 29.5 3 26.5 3 21 Z"/>
+  </defs>
+  <use href="#head" fill="#F3EEFF" stroke="#F3EEFF" stroke-width="2.5" stroke-linejoin="round"/>
+  <use href="#head" fill="#17141F"/>
+  <ellipse cx="10.5" cy="18" rx="3.2" ry="3.6" fill="#FFCB47"/>
+  <ellipse cx="21.5" cy="18" rx="3.2" ry="3.6" fill="#FFCB47"/>
+  <ellipse cx="10.8" cy="18.4" rx="1.9" ry="2.7" fill="#17141F"/>
+  <ellipse cx="21.2" cy="18.4" rx="1.9" ry="2.7" fill="#17141F"/>
+  <circle cx="11.6" cy="17" r="0.9" fill="#FFFFFF"/>
+  <circle cx="22" cy="17" r="0.9" fill="#FFFFFF"/>
+  <path d="M14.8 22.6 h2.4 l-1.2 1.4 Z" fill="#FF8FB1" stroke="#FF8FB1" stroke-width="0.6" stroke-linejoin="round"/>
+</svg>
