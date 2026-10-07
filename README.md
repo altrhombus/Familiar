@@ -85,6 +85,7 @@ familiar configmgr publish my-build.json   # publish an existing build without r
 familiar info E:\sources\install.wim    # indexes, release, patch level, support (elevated)
 familiar doctor --recipe my-build.json  # check this machine (Defender, disk, network, ConfigMgr) before building
 familiar build my-build.json            # run the build (elevated)
+familiar cleanup --working-directory D:\Familiar\Work   # discard mounts and folders an interrupted build left (elevated)
 ```
 
 Release data refreshes from the network every 12 hours; pass `--offline` on air-gapped machines.

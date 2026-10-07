@@ -71,8 +71,7 @@ public sealed class BuildRunner(
 
         var source = new SourceDetails(info.ImageName, info.InstallationType, architecture, updateFiles);
 
-        var work = Path.Combine(recipe.WorkingDirectory, DateTime.Now.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture));
-        Directory.CreateDirectory(work);
+        var work = Images.WorkingFolders.Create(recipe.WorkingDirectory, DateTime.Now);
         log($"Working folder: {work}");
 
         var started = DateTime.Now;
@@ -93,8 +92,16 @@ public sealed class BuildRunner(
         }
         finally
         {
-            // Mounted images are already unmounted (and discarded on failure) by the time we get here.
-            TryDelete(work, log);
+            // Mounts are discarded on failure before we get here, but a discard can itself fail; deleting into a
+            // live mount would damage it, so leave the folder for 'familiar cleanup'.
+            if (StillMounted(work) is { } mount)
+            {
+                log($"Not removing working folder {work}: {mount} is still mounted. Run 'familiar cleanup' to discard it.");
+            }
+            else
+            {
+                TryDelete(work, log);
+            }
         }
 
         log($"Done: {recipe.Output.Path}");
@@ -352,6 +359,19 @@ public sealed class BuildRunner(
     }
 
     private sealed record SourceDetails(string Name, string InstallationType, string Architecture, IReadOnlyList<UpdateFile>? UpdateFiles);
+
+    private static string? StillMounted(string folder)
+    {
+        try
+        {
+            return Images.WorkingFolders.MountsInside(folder, new Images.DismMountTable()) is { Count: > 0 } left ? left[0].MountPath : null;
+        }
+        catch (Exception ex) when (ex is Microsoft.Dism.DismException or System.Runtime.InteropServices.COMException)
+        {
+            // If DISM cannot say, assume the worst.
+            return folder;
+        }
+    }
 
     private static void TryDelete(string folder, Action<string> log)
     {
