@@ -20,14 +20,15 @@ public sealed record BuildResult(string OutputPath, IReadOnlyList<string> Warnin
 /// </summary>
 /// <param name="catalog">Release data, used to order updates and spot missing ones. Builds still run without it.</param>
 /// <param name="downloader">Needed only for recipes that download updates.</param>
+/// <param name="images">Reads, exports and mounts images; the DISM API and dism.exe unless a test replaces it.</param>
 /// <param name="connectConfigMgr">Replaces the Configuration Manager connection (tests); defaults to <see cref="ConfigMgrConnector"/>.</param>
 public sealed class BuildRunner(
     ReleaseCatalog? catalog = null,
     UpdateDownloader? downloader = null,
-    DismCommand? dismCommand = null,
+    IImageServicer? images = null,
     Func<ConfigMgrSection, Action<string>, CancellationToken, Task<IConfigMgrConnection>>? connectConfigMgr = null)
 {
-    private readonly DismCommand _dism = dismCommand ?? new DismCommand();
+    private readonly IImageServicer _images = images ?? new DismImageServicer();
 
     public async Task<BuildResult> RunAsync(
         BuildRecipe recipe,
@@ -53,14 +54,14 @@ public sealed class BuildRunner(
         var media = recipe.Languages is null ? null : LanguageMedia.Scan(recipe.Languages.MediaPath);
         var mediaBuild = media is null ? null : await ReadMediaBuildAsync(media, cancellationToken).ConfigureAwait(false);
 
-        var info = DismApi.GetImageInfo(recipe.Source.Path).FirstOrDefault(i => i.ImageIndex == recipe.Source.Index)
+        var info = _images.GetIndex(recipe.Source.Path, recipe.Source.Index)
             ?? throw new BuildException($"Index {recipe.Source.Index} does not exist in {recipe.Source.Path}.");
-        var architecture = info.Architecture == DismProcessorArchitecture.ARM64 ? "arm64" : "x64";
+        var architecture = string.Equals(info.Architecture, nameof(DismProcessorArchitecture.ARM64), StringComparison.OrdinalIgnoreCase) ? "arm64" : "x64";
 
         // Download before mounting, so a long download never holds a mount open.
         if (recipe.Updates is { Download: true } download)
         {
-            await DownloadUpdatesAsync(download, recipe.WinRE.Update, info.ProductVersion.Build, info.InstallationType, architecture, progress, log, cancellationToken).ConfigureAwait(false);
+            await DownloadUpdatesAsync(download, recipe.WinRE.Update, info.Version.Build, info.InstallationType, architecture, progress, log, cancellationToken).ConfigureAwait(false);
         }
 
         var updateFiles = recipe.Updates is null ? null : UpdatePlanner.Scan(recipe.Updates.Folder);
@@ -69,7 +70,7 @@ public sealed class BuildRunner(
             throw new BuildException($"No .msu or .cab files with a KB number were found in {recipe.Updates!.Folder}.");
         }
 
-        var source = new SourceDetails(info.ImageName, info.InstallationType, architecture, updateFiles);
+        var source = new SourceDetails(info.Name, info.InstallationType, architecture, updateFiles);
 
         var work = Images.WorkingFolders.Create(recipe.WorkingDirectory, DateTime.Now);
         log($"Working folder: {work}");
@@ -187,9 +188,9 @@ public sealed class BuildRunner(
         CancellationToken cancellationToken)
     {
         var workImage = Path.Combine(work, "install.wim");
-        await Run(_dism.ExportImageAsync(recipe.Source.Path, recipe.Source.Index, workImage, progress: progress, cancellationToken: cancellationToken)).ConfigureAwait(false);
+        await Run(_images.ExportAsync(recipe.Source.Path, recipe.Source.Index, workImage, progress: progress, cancellationToken: cancellationToken)).ConfigureAwait(false);
 
-        await using (var image = await MountedImage.MountAsync(workImage, 1, Path.Combine(work, "mount"), progress, _dism, cancellationToken).ConfigureAwait(false))
+        await using (var image = await _images.MountAsync(workImage, 1, Path.Combine(work, "mount"), progress, cancellationToken).ConfigureAwait(false))
         {
             var baseline = image.GetServicingBaselineBuild();
 
@@ -318,7 +319,7 @@ public sealed class BuildRunner(
 
         // Exporting drops the space left behind by replaced files and stores the final name.
         Directory.CreateDirectory(Path.GetDirectoryName(recipe.Output.Path)!);
-        await Run(_dism.ExportImageAsync(workImage, 1, recipe.Output.Path, recipe.Output.ImageName ?? source.Name, progress, cancellationToken)).ConfigureAwait(false);
+        await Run(_images.ExportAsync(workImage, 1, recipe.Output.Path, recipe.Output.ImageName ?? source.Name, progress, cancellationToken)).ConfigureAwait(false);
     }
 
     private async Task DownloadUpdatesAsync(
@@ -389,7 +390,7 @@ public sealed class BuildRunner(
     /// stack), languages, the Safe OS Dynamic Update, cleanup, export.
     /// </summary>
     private async Task<IReadOnlyList<string>> ServiceWinREAsync(
-        MountedImage image,
+        IMountedImage image,
         WinREWork plan,
         WindowsRelease? release,
         string architecture,
@@ -409,12 +410,12 @@ public sealed class BuildRunner(
         File.Copy(winRE, workWinRE);
         File.SetAttributes(workWinRE, FileAttributes.Normal);
 
-        var original = DismApi.GetImageInfo(workWinRE)[0].ProductVersion;
+        var original = WinREVersion(workWinRE);
         log($"WinRE: build {original.Build}.{original.Revision}");
 
         var warnings = new List<string>();
         var changed = false;
-        await using (var recovery = await MountedImage.MountAsync(workWinRE, 1, Path.Combine(work, "winre-mount"), progress, _dism, cancellationToken).ConfigureAwait(false))
+        await using (var recovery = await _images.MountAsync(workWinRE, 1, Path.Combine(work, "winre-mount"), progress, cancellationToken).ConfigureAwait(false))
         {
             if (plan.SafeOS is not null && plan.Updates is { } updates)
             {
@@ -493,9 +494,9 @@ public sealed class BuildRunner(
 
         // Re-export to shrink WinRE, then put it back where Windows expects it.
         var compacted = Path.Combine(work, "winre-final.wim");
-        await Run(_dism.ExportImageAsync(workWinRE, 1, compacted, progress: progress, cancellationToken: cancellationToken)).ConfigureAwait(false);
+        await Run(_images.ExportAsync(workWinRE, 1, compacted, progress: progress, cancellationToken: cancellationToken)).ConfigureAwait(false);
 
-        var serviced = DismApi.GetImageInfo(compacted)[0].ProductVersion;
+        var serviced = WinREVersion(compacted);
         var before = new FileInfo(winRE).Length;
         var after = new FileInfo(compacted).Length;
         log($"WinRE: build {original.Build}.{original.Revision} -> {serviced.Build}.{serviced.Revision}, {Megabytes(before)} MB -> {Megabytes(after)} MB");
@@ -516,6 +517,9 @@ public sealed class BuildRunner(
         File.SetAttributes(winRE, attributes);
         return warnings;
     }
+
+    private Version WinREVersion(string winRE) =>
+        _images.GetIndex(winRE, 1)?.Version ?? throw new BuildException($"{winRE} has no image at index 1.");
 
     // 0x8007007E as dism.exe's exit code.
     private const int CombinedUpdateKnownIssue = unchecked((int)0x8007007E);

@@ -35,17 +35,7 @@ public sealed class DismHost : IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        return DismApi.GetImageInfo(imagePath)
-            .Select(i => new ImageIndexInfo(
-                i.ImageIndex,
-                i.ImageName,
-                i.EditionId,
-                i.InstallationType,
-                i.Architecture.ToString(),
-                i.ProductVersion,
-                i.DefaultLanguage?.Name,
-                i.Languages.Select(l => l.Name).ToList()))
-            .ToList();
+        return Servicing.DismImageServicer.ReadIndexes(imagePath);
     }
 
     /// <summary>
