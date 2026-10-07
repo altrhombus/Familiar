@@ -7,8 +7,8 @@ Configuration Manager or packs it into an ISO.
 Familiar is a C# successor to [WIM Witch](https://github.com/thenotoriousdrr/WIM-Witch), which is no
 longer maintained.
 
-> **Status:** early. Recipe-driven language builds work end to end: a Windows 11 25H2 Enterprise image
-> has been built with German and Japanese (including WinRE) from the 24H2/25H2 language media.
+> **Status:** early. Recipe-driven builds work end to end: a Windows 11 25H2 Enterprise image has been built
+> with 16 languages, re-provisioned inbox apps, the latest cumulative and .NET updates, and a patched WinRE.
 
 ## Layout
 
@@ -53,17 +53,7 @@ longer maintained.
 
 ## Roadmap
 
-1. ~~Mount/dismount, index selection, export~~
-2. ~~Languages: language packs, language FODs, WinRE languages, default UI language~~
-3. ~~Recipes (JSON) and the CLI build command~~
-4. ~~Updates: LCU, checkpoint CUs and .NET from a folder; WinRE patched with the Safe OS Dynamic Update~~; still to do: Setup Dynamic Update for install media
-5. ~~Re-provisioning inbox apps from the Inbox Apps ISO~~; still to do: boot.wim and `lang.ini` for install media
-6. Drivers, .NET 3.5, provisioned app removal, registry files, custom scripts
-7. ~~Configuration Manager: create/update OS image packages, distribute content~~ (needs a run against a real site); still to do: ConfigMgr as an update source; publishing with other credentials than the signed-in account
-8. ~~Update downloads from the Microsoft Update Catalog~~
-9. ISO creation (`oscdimg` from the ADK)
-10. Autopilot JSON drop-in
-11. Local Experience Packs (.appx languages): Windows 11 cannot image them (only .cab language packs and LIPs), so consider only if Microsoft documents a supported path
+See [ROADMAP.md](ROADMAP.md).
 
 ## Building
 

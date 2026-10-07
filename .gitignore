@@ -480,3 +480,6 @@ $RECYCLE.BIN/
 
 # Vim temporary swap files
 *.swp
+
+# Personal handoff notes (internal server names); carried between devices outside git
+HANDOFF.md
