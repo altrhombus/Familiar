@@ -72,7 +72,8 @@ public sealed class UpdatePlannerTests : IDisposable
         var plan = UpdatePlanner.Plan(Files(olderDotNet, DotNet, Target), new UpdateTarget(Release25H2, "x64", 6584), Catalog);
 
         Assert.Equal([Target, DotNet], Paths(plan));
-        Assert.Contains(plan.Warnings, w => w.Contains("KB5120708", StringComparison.Ordinal) && w.Contains("newer .NET", StringComparison.Ordinal));
+        Assert.Contains(plan.Notes, n => n.Contains("KB5120708", StringComparison.Ordinal) && n.Contains("newer .NET", StringComparison.Ordinal));
+        Assert.DoesNotContain(plan.Warnings, w => w.Contains("KB5129999", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -99,7 +100,8 @@ public sealed class UpdatePlannerTests : IDisposable
         var plan = UpdatePlanner.Plan(Files(Checkpoint, Target), new UpdateTarget(Release25H2, "x64", 6584), Catalog);
 
         Assert.Equal([Target], Paths(plan));
-        Assert.Contains(plan.Warnings, w => w.Contains("already at revision 6584", StringComparison.Ordinal));
+        Assert.Contains(plan.Notes, n => n.Contains("already at revision 6584", StringComparison.Ordinal));
+        Assert.Empty(plan.Warnings);
     }
 
     [Fact]

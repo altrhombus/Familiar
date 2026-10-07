@@ -16,4 +16,7 @@ public sealed record ServicingPlan(
     IReadOnlyList<string> Errors)
 {
     public bool IsValid => Errors.Count == 0;
+
+    /// <summary>Routine decisions worth logging but not worth a warning, such as skipping an update the image already has.</summary>
+    public IReadOnlyList<string> Notes { get; init; } = [];
 }

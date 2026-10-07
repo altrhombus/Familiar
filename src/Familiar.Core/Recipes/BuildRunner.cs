@@ -273,6 +273,10 @@ public sealed class BuildRunner(
             {
                 var plan = UpdatePlanner.Plan(files, new UpdateTarget(release, source.Architecture, version?.UpdateBuildRevision), catalog);
                 warnings.AddRange(plan.Warnings);
+                foreach (var note in plan.Notes)
+                {
+                    log(note);
+                }
 
                 log($"Adding {plan.Actions.Count} updates");
                 var scratch = Path.Combine(work, "scratch");

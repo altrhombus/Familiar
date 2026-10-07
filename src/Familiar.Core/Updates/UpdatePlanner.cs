@@ -60,6 +60,7 @@ public static partial class UpdatePlanner
         ArgumentNullException.ThrowIfNull(target);
 
         var warnings = new List<string>();
+        var notes = new List<string>();
         var known = new List<(UpdateFile File, WindowsUpdate Update)>();
         var unknown = new List<UpdateFile>();
 
@@ -100,7 +101,7 @@ public static partial class UpdatePlanner
 
             if (target.InstalledRevision is { } installed && update.Revision <= installed)
             {
-                warnings.Add($"Skipping {file.Kb}: the image is already at revision {installed}.");
+                notes.Add($"Skipping {file.Kb}: the image is already at revision {installed}.");
                 continue;
             }
 
@@ -123,15 +124,21 @@ public static partial class UpdatePlanner
         var dotNet = unknown.Where(IsDotNet).ToList();
         foreach (var stale in dotNet.OrderByDescending(f => KbNumber(f.Kb)).Skip(1))
         {
-            warnings.Add($"Skipping {stale.Kb}: a newer .NET cumulative update is in the folder.");
+            notes.Add($"Skipping {stale.Kb}: a newer .NET cumulative update is in the folder.");
             unknown.Remove(stale);
         }
 
         foreach (var file in unknown.OrderBy(f => KbNumber(f.Kb)))
         {
+            if (IsDotNet(file))
+            {
+                actions.Add(new AddPackageAction(file.Path, $"{file.Kb} .NET cumulative update"));
+                continue;
+            }
+
             if (branchUpdates.Count > 0)
             {
-                warnings.Add($"{file.Kb} is not a Windows cumulative update in the release data; applying it after them (expected for .NET updates).");
+                warnings.Add($"{file.Kb} is not a Windows cumulative update in the release data; applying it after them.");
             }
 
             actions.Add(new AddPackageAction(file.Path, $"{file.Kb}"));
@@ -144,7 +151,7 @@ public static partial class UpdatePlanner
             warnings.Add($"The latest update for {target.Release.Name} is {latest}, which is not in the updates folder.");
         }
 
-        return new ServicingPlan(actions, warnings, []);
+        return new ServicingPlan(actions, warnings, []) { Notes = notes };
     }
 
     private static bool IsDotNet(UpdateFile file) =>
