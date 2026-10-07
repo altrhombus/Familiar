@@ -5,6 +5,7 @@
     <Project Path="src/Familiar.Core/Familiar.Core.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/Familiar.Cli.Tests/Familiar.Cli.Tests.csproj" />
     <Project Path="tests/Familiar.Core.Tests/Familiar.Core.Tests.csproj" />
   </Folder>
 </Solution>

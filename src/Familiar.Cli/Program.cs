@@ -1,4 +1,5 @@
 using System.CommandLine;
+using Familiar.Cli;
 using Familiar.Cli.Commands;
 
 var rootCommand = new RootCommand("Familiar: offline Windows image servicing.")
@@ -15,4 +16,8 @@ var rootCommand = new RootCommand("Familiar: offline Windows image servicing.")
     DoctorCommand.Create(),
 };
 
-return await rootCommand.Parse(args).InvokeAsync();
+// Familiar handles Ctrl+C itself (see Interruption); a null timeout turns System.CommandLine's handling off.
+using var interruption = new Interruption(Console.Error);
+Console.CancelKeyPress += (_, e) => e.Cancel = interruption.OnInterrupt();
+
+return await rootCommand.Parse(args).InvokeAsync(new InvocationConfiguration { ProcessTerminationTimeout = null }, interruption.Token);
