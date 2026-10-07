@@ -328,9 +328,24 @@ public sealed class BuildRunner(
             await image.CommitAsync(progress, cancellationToken).ConfigureAwait(false);
         }
 
-        // Exporting drops the space left behind by replaced files and stores the final name.
+        // Exporting drops the space left behind by replaced files and stores the final name. It goes to a temporary
+        // name beside the output and is renamed when complete, so a failed export never leaves a partial image at
+        // output.path, where it would block the next build and could be published.
         Directory.CreateDirectory(Path.GetDirectoryName(recipe.Output.Path)!);
-        await Run(_images.ExportAsync(workImage, 1, recipe.Output.Path, recipe.Output.ImageName ?? source.Name, progress, cancellationToken)).ConfigureAwait(false);
+        var partial = recipe.Output.Path + ".familiar-partial";
+
+        // Exporting into an existing WIM adds an index to it, so a partial file left by a crash must go first.
+        File.Delete(partial);
+        try
+        {
+            await Run(_images.ExportAsync(workImage, 1, partial, recipe.Output.ImageName ?? source.Name, progress, cancellationToken)).ConfigureAwait(false);
+            File.Move(partial, recipe.Output.Path);
+        }
+        catch
+        {
+            File.Delete(partial);
+            throw;
+        }
     }
 
     private async Task DownloadUpdatesAsync(

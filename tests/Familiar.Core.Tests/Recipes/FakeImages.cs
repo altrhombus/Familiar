@@ -39,6 +39,9 @@ internal sealed class FakeImages(string sourcePath, string outputPath) : IImageS
     /// <summary>Runs before every applied action, with its call text; tests use it to cancel or fail mid-build.</summary>
     public Action<string>? OnApply { get; init; }
 
+    /// <summary>Exports to a file with this name fail with exit code 1 after writing part of it.</summary>
+    public string? FailExportTo { get; init; }
+
     /// <summary>Unmounting without saving fails and leaves the image mounted, as when a file in the mount is in use.</summary>
     public bool FailDiscard { get; init; }
 
@@ -60,7 +63,8 @@ internal sealed class FakeImages(string sourcePath, string outputPath) : IImageS
         Calls.Add($"export {Name(sourceImage)} -> {Name(destinationImage)}" + (destinationName is null ? string.Empty : $" as {destinationName}"));
         Directory.CreateDirectory(Path.GetDirectoryName(destinationImage)!);
         File.WriteAllBytes(destinationImage, Path.GetFileName(destinationImage) == "winre-final.wim" ? ServicedWinREContent : [1]);
-        return Task.FromResult(new DismCommandResult(0, string.Empty));
+        var failed = string.Equals(Path.GetFileName(destinationImage), FailExportTo, StringComparison.OrdinalIgnoreCase);
+        return Task.FromResult(new DismCommandResult(failed ? 1 : 0, failed ? "Error: 112 There is not enough space on the disk." : string.Empty));
     }
 
     public Task<IMountedImage> MountAsync(

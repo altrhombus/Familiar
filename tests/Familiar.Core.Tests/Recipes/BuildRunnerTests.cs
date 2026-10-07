@@ -89,7 +89,7 @@ public sealed class BuildRunnerTests : IDisposable
                 "image dism-add " + DotNetUpdate,
                 "image cleanup",
                 "image commit",
-                "export install.wim -> output as Windows 11 Enterprise de-DE",
+                "export install.wim -> install-de.wim.familiar-partial as Windows 11 Enterprise de-DE",
             ],
             images.Calls);
         Assert.Equal(_output, result.OutputPath);
@@ -136,6 +136,30 @@ public sealed class BuildRunnerTests : IDisposable
         Assert.DoesNotContain("image commit", images.Calls);
         Assert.False(File.Exists(_output));
         Assert.Empty(Directory.GetDirectories(_work));
+    }
+
+    [Fact]
+    public async Task Build_FailedExport_LeavesNothingAtTheOutputPath()
+    {
+        var images = Images(failExportTo: "install-de.wim.familiar-partial");
+
+        var ex = await Assert.ThrowsAsync<BuildException>(() => Runner(images).RunAsync(Recipe(), log: _log.Add, cancellationToken: TestContext.Current.CancellationToken));
+
+        Assert.Contains("not enough space", ex.Message, StringComparison.Ordinal);
+        Assert.Empty(Directory.GetFiles(Path.GetDirectoryName(_output)!));
+    }
+
+    [Fact]
+    public async Task Build_PartialOutputFromACrash_IsReplacedNotAppendedTo()
+    {
+        // dism /Export-Image into an existing WIM adds an index, so a leftover partial file must not survive.
+        File.WriteAllBytes(Touch(_output + ".familiar-partial"), [7, 7, 7]);
+        var images = Images();
+
+        await Runner(images).RunAsync(Recipe(), log: _log.Add, cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Equal([1], File.ReadAllBytes(_output));
+        Assert.Equal([_output], Directory.GetFiles(Path.GetDirectoryName(_output)!));
     }
 
     [Fact]
@@ -283,10 +307,11 @@ public sealed class BuildRunnerTests : IDisposable
     }
 
     private FakeImages Images(
-        Action<string>? onApply = null, bool failDiscard = false, bool registryUnreadable = false, bool withWinRE = true, byte[]? servicedWinRE = null) =>
+        Action<string>? onApply = null, bool failDiscard = false, bool registryUnreadable = false, bool withWinRE = true, byte[]? servicedWinRE = null, string? failExportTo = null) =>
         new(_source, _output)
         {
             OnApply = onApply,
+            FailExportTo = failExportTo,
             FailDiscard = failDiscard,
             RegistryUnreadable = registryUnreadable,
             WithWinRE = withWinRE,
