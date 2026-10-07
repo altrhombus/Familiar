@@ -141,23 +141,66 @@ public sealed class UpdateDownloader(HttpClient http, ReleaseCatalog catalog)
                 }
             }
 
-            foreach (var previous in DownloadManifest.Read(target).Except(current, StringComparer.OrdinalIgnoreCase))
-            {
-                var path = Path.Combine(target, previous);
-                if (File.Exists(path))
-                {
-                    File.Delete(path);
-                    removed.Add(path);
-                }
-            }
-
+            removed.AddRange(PruneSuperseded(target, current));
             DownloadManifest.Write(target, current);
         }
     }
 
-    private async Task<DownloadedFile> DownloadFileAsync(CatalogFile file, string folder, IProgress<ServicingProgress>? progress, CancellationToken cancellationToken)
+    /// <summary>
+    /// Deletes the files of Familiar's previous download into <paramref name="folder"/> that are not in
+    /// <paramref name="current"/>. Builds run elevated, so the manifest is not trusted: only plain .msu and .cab
+    /// file names directly inside the folder are deleted, never a path that leads elsewhere.
+    /// </summary>
+    internal static IReadOnlyList<string> PruneSuperseded(string folder, IReadOnlyCollection<string> current)
     {
-        var target = Path.Combine(folder, file.FileName);
+        var removed = new List<string>();
+        foreach (var previous in DownloadManifest.Read(folder).Except(current, StringComparer.OrdinalIgnoreCase))
+        {
+            if (ChildPath(folder, previous) is { } path
+                && (path.EndsWith(".msu", StringComparison.OrdinalIgnoreCase) || path.EndsWith(".cab", StringComparison.OrdinalIgnoreCase))
+                && File.Exists(path))
+            {
+                File.Delete(path);
+                removed.Add(path);
+            }
+        }
+
+        return removed;
+    }
+
+    /// <summary>
+    /// The full path of <paramref name="fileName"/> directly inside <paramref name="folder"/>, or null when it is not a
+    /// plain file name (empty, rooted, a relative path, a stream, or anything else that would resolve elsewhere).
+    /// </summary>
+    internal static string? ChildPath(string folder, string fileName)
+    {
+        if (string.IsNullOrWhiteSpace(fileName) || fileName is "." or ".."
+            || fileName.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0
+            || !string.Equals(Path.GetFileName(fileName), fileName, StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        var root = Path.GetFullPath(folder);
+        var path = Path.GetFullPath(Path.Combine(root, fileName));
+        return string.Equals(Path.GetDirectoryName(path), Path.TrimEndingDirectorySeparator(root), StringComparison.OrdinalIgnoreCase) ? path : null;
+    }
+
+    /// <summary>Downloads one catalog file into <paramref name="folder"/>, refusing any file it cannot verify.</summary>
+    internal async Task<DownloadedFile> DownloadFileAsync(CatalogFile file, string folder, IProgress<ServicingProgress>? progress, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(file);
+        var target = ChildPath(folder, file.FileName)
+            ?? throw new InvalidDataException($"The Update Catalog listed a file name that is not a plain file name: \"{file.FileName}\".");
+
+        // Fail closed: without a digest nothing can be verified, so a change in the catalog page must not let files through.
+        if (!IsSha1Digest(file.Sha1))
+        {
+            throw new InvalidDataException(
+                $"The Update Catalog listed no usable SHA-1 digest for {file.FileName}, so it cannot be verified. "
+                + "Try again later, or download it yourself into the updates folder and set updates.download to false.");
+        }
+
         if (File.Exists(target) && await MatchesAsync(target, file.Sha1, cancellationToken).ConfigureAwait(false))
         {
             return new DownloadedFile(target, AlreadyPresent: true);
@@ -195,7 +238,7 @@ public sealed class UpdateDownloader(HttpClient http, ReleaseCatalog catalog)
         }
 
         var actual = Convert.ToBase64String(hash.GetHashAndReset());
-        if (file.Sha1 is not null && !string.Equals(actual, file.Sha1, StringComparison.Ordinal))
+        if (!string.Equals(actual, file.Sha1, StringComparison.Ordinal))
         {
             File.Delete(partial);
             throw new InvalidDataException($"{file.FileName} failed verification (SHA-1 {actual}, expected {file.Sha1}). Try the download again.");
@@ -206,17 +249,19 @@ public sealed class UpdateDownloader(HttpClient http, ReleaseCatalog catalog)
     }
 
     [System.Diagnostics.CodeAnalysis.SuppressMessage("Security", "CA5350:Do Not Use Weak Cryptographic Algorithms",
-        Justification = "SHA-1 is the digest the Update Catalog publishes; this is an integrity check over HTTPS, not a security boundary.")]
-    private static async Task<bool> MatchesAsync(string path, string? expectedSha1, CancellationToken cancellationToken)
+        Justification = "SHA-1 is the only digest the Update Catalog publishes. It is checked against the catalog's own listing; no practical second-preimage attack on SHA-1 is known.")]
+    private static async Task<bool> MatchesAsync(string path, string expectedSha1, CancellationToken cancellationToken)
     {
-        if (expectedSha1 is null)
-        {
-            return true;
-        }
-
         await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 20, useAsync: true);
         var actual = await SHA1.HashDataAsync(stream, cancellationToken).ConfigureAwait(false);
         return string.Equals(Convert.ToBase64String(actual), expectedSha1, StringComparison.Ordinal);
+    }
+
+    /// <summary>Whether <paramref name="digest"/> is a base64 SHA-1 digest (20 bytes), as the catalog lists them.</summary>
+    internal static bool IsSha1Digest([System.Diagnostics.CodeAnalysis.NotNullWhen(true)] string? digest)
+    {
+        Span<byte> bytes = stackalloc byte[21];
+        return digest is not null && Convert.TryFromBase64String(digest, bytes, out var written) && written == 20;
     }
 
     // "2026-09 Cumulative Update for Windows 11, version 25H2 for x64-based Systems (KB5129195) (26200.9457)"
