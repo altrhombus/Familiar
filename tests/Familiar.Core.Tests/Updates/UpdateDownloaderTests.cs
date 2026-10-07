@@ -46,6 +46,16 @@ public sealed class UpdateDownloaderTests : IDisposable
         Assert.Empty(Directory.GetFiles(_folder));
     }
 
+    [Fact]
+    public async Task Download_NotSignedByMicrosoft_FailsAndKeepsNothing()
+    {
+        var ex = await Assert.ThrowsAsync<InvalidDataException>(() => Downloader(new FileHandler(Content), _ => "it has no signature")
+            .DownloadFileAsync(File("windows11.0-kb5100000-x64.msu", Digest(Content)), _folder, null, TestContext.Current.CancellationToken));
+
+        Assert.Contains("it has no signature", ex.Message, StringComparison.Ordinal);
+        Assert.Empty(Directory.GetFiles(_folder));
+    }
+
     [Theory]
     [InlineData(null)]
     [InlineData("")]
@@ -167,8 +177,9 @@ public sealed class UpdateDownloaderTests : IDisposable
         Assert.Equal(expected, UpdateDownloader.IsSha1Digest(digest));
     }
 
-    private static UpdateDownloader Downloader(HttpMessageHandler handler) =>
-        new(new HttpClient(handler), TestData.Catalog());
+    // The content here is a few bytes, not a signed update, so the signature check is replaced; UpdateSignatureTests cover it.
+    private static UpdateDownloader Downloader(HttpMessageHandler handler, Func<string, string?>? checkSignature = null) =>
+        new(new HttpClient(handler), TestData.Catalog(), checkSignature ?? (_ => null));
 
     private static CatalogFile File(string fileName, string? digest) => new(FileUrl, fileName, digest);
 

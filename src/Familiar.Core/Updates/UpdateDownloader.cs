@@ -49,9 +49,14 @@ internal static class DownloadManifest
 internal sealed partial class ManifestJsonContext : System.Text.Json.Serialization.JsonSerializerContext;
 
 /// <summary>Finds and downloads the latest updates for a release from the Microsoft Update Catalog.</summary>
-public sealed class UpdateDownloader(HttpClient http, ReleaseCatalog catalog)
+/// <param name="checkSignature">
+/// Returns why a downloaded file is not signed by Microsoft, or null when it is; <see cref="UpdateSignature.Check"/>
+/// unless a test replaces it.
+/// </param>
+public sealed class UpdateDownloader(HttpClient http, ReleaseCatalog catalog, Func<string, string?>? checkSignature = null)
 {
     private readonly UpdateCatalogClient _client = new(http);
+    private readonly Func<string, string?> _checkSignature = checkSignature ?? UpdateSignature.Check;
 
     /// <summary>
     /// Picks the latest cumulative update the release data knows for <paramref name="release"/>, then the catalog
@@ -106,7 +111,8 @@ public sealed class UpdateDownloader(HttpClient http, ReleaseCatalog catalog)
     public const string ManifestFileName = "familiar-downloads.json";
 
     /// <summary>
-    /// Downloads every file for the selected updates into <paramref name="folder"/>, verifying SHA-1, then removes
+    /// Downloads every file for the selected updates into <paramref name="folder"/>, verifying SHA-1 and Microsoft's
+    /// signature, then removes
     /// files from Familiar's previous download that the new selection supersedes. Cumulative updates replace each
     /// other, and every file left in the folder is installed, so stale ones only add build time. Files Familiar
     /// did not download are never removed. The Safe OS update goes in the SafeOS subfolder, which builds apply to
@@ -242,6 +248,12 @@ public sealed class UpdateDownloader(HttpClient http, ReleaseCatalog catalog)
         {
             File.Delete(partial);
             throw new InvalidDataException($"{file.FileName} failed verification (SHA-1 {actual}, expected {file.Sha1}). Try the download again.");
+        }
+
+        if (_checkSignature(partial) is { } problem)
+        {
+            File.Delete(partial);
+            throw new InvalidDataException($"{file.FileName} was not installed because {problem}. It matched the catalog's digest, so report it rather than retrying.");
         }
 
         File.Move(partial, target, overwrite: true);

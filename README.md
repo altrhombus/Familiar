@@ -50,7 +50,7 @@ longer maintained.
   their bundles add resources for newly added languages. Dependencies come from each app's own manifest.
 - **Updates downloaded for you.** The latest cumulative update comes from the release data; Familiar finds it
   in the Microsoft Update Catalog, downloads every file it lists (including checkpoint updates), verifies each
-  against the catalog's SHA-1 (refusing any file it cannot verify), and installs them oldest first after languages. The catalog has no API, so its
+  against the catalog's SHA-1 and Microsoft's Authenticode signature (refusing any file that fails either), and installs them oldest first after languages. The catalog has no API, so its
   page parsing is isolated in `UpdateCatalogClient`. A plain folder of MSUs works too.
 - **The app runs unpackaged** so it can elevate, and bundles the Windows App SDK so no runtime install
   is needed. It starts unelevated and offers to restart as administrator.
