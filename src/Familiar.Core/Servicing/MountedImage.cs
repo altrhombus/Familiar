@@ -7,17 +7,19 @@ namespace Familiar.Core.Servicing;
 /// A WIM index mounted for servicing. Dispose without committing discards all changes, so an exception
 /// partway through a build never leaves a half-serviced image behind.
 /// </summary>
-public sealed class MountedImage : IAsyncDisposable
+public sealed class MountedImage : IMountedImage
 {
+    private readonly DismCommand _dism;
     private DismSession? _session;
     private bool _unmounted;
 
-    private MountedImage(string imagePath, int index, string mountPath, DismSession session)
+    private MountedImage(string imagePath, int index, string mountPath, DismSession session, DismCommand dism)
     {
         ImagePath = imagePath;
         Index = index;
         MountPath = mountPath;
         _session = session;
+        _dism = dism;
     }
 
     public string ImagePath { get; }
@@ -29,17 +31,18 @@ public sealed class MountedImage : IAsyncDisposable
     private DismSession Session => _session ?? throw new ObjectDisposedException(nameof(MountedImage));
 
     /// <summary>Mounts an index read-write. The DISM API must be initialized (see <see cref="Images.DismHost"/>).</summary>
+    /// <param name="dism">Runs the dism.exe operations; the system's dism.exe unless set.</param>
     public static Task<MountedImage> MountAsync(
-        string imagePath, int index, string mountPath, IProgress<ServicingProgress>? progress = null, CancellationToken cancellationToken = default) =>
-        MountAsync(imagePath, index, mountPath, readOnly: false, progress, cancellationToken);
+        string imagePath, int index, string mountPath, IProgress<ServicingProgress>? progress = null, DismCommand? dism = null, CancellationToken cancellationToken = default) =>
+        MountAsync(imagePath, index, mountPath, readOnly: false, progress, dism, cancellationToken);
 
     /// <summary>Mounts an index for reading only; nothing can be saved.</summary>
     public static Task<MountedImage> MountReadOnlyAsync(
         string imagePath, int index, string mountPath, IProgress<ServicingProgress>? progress = null, CancellationToken cancellationToken = default) =>
-        MountAsync(imagePath, index, mountPath, readOnly: true, progress, cancellationToken);
+        MountAsync(imagePath, index, mountPath, readOnly: true, progress, dism: null, cancellationToken);
 
     private static async Task<MountedImage> MountAsync(
-        string imagePath, int index, string mountPath, bool readOnly, IProgress<ServicingProgress>? progress, CancellationToken cancellationToken)
+        string imagePath, int index, string mountPath, bool readOnly, IProgress<ServicingProgress>? progress, DismCommand? dism, CancellationToken cancellationToken)
     {
         Directory.CreateDirectory(mountPath);
         if (Directory.EnumerateFileSystemEntries(mountPath).Any())
@@ -54,7 +57,7 @@ public sealed class MountedImage : IAsyncDisposable
 
         try
         {
-            return new MountedImage(imagePath, index, mountPath, DismApi.OpenOfflineSession(mountPath));
+            return new MountedImage(imagePath, index, mountPath, DismApi.OpenOfflineSession(mountPath), dism ?? new DismCommand());
         }
         catch
         {
@@ -142,11 +145,20 @@ public sealed class MountedImage : IAsyncDisposable
         }
     }
 
+    public Task<DismCommandResult> AddUpdateAsync(string packagePath, string scratchPath, string description, IProgress<ServicingProgress>? progress = null, CancellationToken cancellationToken = default) =>
+        RunExternalAsync(mount => _dism.AddPackageAsync(mount, packagePath, scratchPath, description, progress, cancellationToken));
+
+    public Task<DismCommandResult> SetAllInternationalAsync(string language, IProgress<ServicingProgress>? progress = null, CancellationToken cancellationToken = default) =>
+        RunExternalAsync(mount => _dism.SetAllInternationalAsync(mount, language, progress, cancellationToken));
+
+    public Task<DismCommandResult> CleanupComponentsAsync(bool resetBase, IProgress<ServicingProgress>? progress = null, CancellationToken cancellationToken = default) =>
+        RunExternalAsync(mount => _dism.CleanupComponentsAsync(mount, resetBase, progress, cancellationToken));
+
     /// <summary>
     /// Runs a dism.exe operation against the mount. DISM allows one servicing session per image, so the API
     /// session is closed for the duration (otherwise dism.exe fails with error 183) and reopened afterwards.
     /// </summary>
-    public async Task<T> RunExternalAsync<T>(Func<string, Task<T>> operation)
+    private async Task<T> RunExternalAsync<T>(Func<string, Task<T>> operation)
     {
         ArgumentNullException.ThrowIfNull(operation);
         ObjectDisposedException.ThrowIf(_session is null || _unmounted, this);

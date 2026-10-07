@@ -189,7 +189,7 @@ public sealed class BuildRunner(
         var workImage = Path.Combine(work, "install.wim");
         await Run(_dism.ExportImageAsync(recipe.Source.Path, recipe.Source.Index, workImage, progress: progress, cancellationToken: cancellationToken)).ConfigureAwait(false);
 
-        await using (var image = await MountedImage.MountAsync(workImage, 1, Path.Combine(work, "mount"), progress, cancellationToken).ConfigureAwait(false))
+        await using (var image = await MountedImage.MountAsync(workImage, 1, Path.Combine(work, "mount"), progress, _dism, cancellationToken).ConfigureAwait(false))
         {
             var baseline = image.GetServicingBaselineBuild();
 
@@ -259,7 +259,7 @@ public sealed class BuildRunner(
                 if (languages.DefaultLanguage is { } defaultLanguage)
                 {
                     log($"Setting default language to {defaultLanguage}");
-                    await Run(image.RunExternalAsync(mount => _dism.SetAllInternationalAsync(mount, defaultLanguage, progress, cancellationToken))).ConfigureAwait(false);
+                    await Run(image.SetAllInternationalAsync(defaultLanguage, progress, cancellationToken)).ConfigureAwait(false);
                 }
             }
 
@@ -297,8 +297,7 @@ public sealed class BuildRunner(
 
                     if (action is AddPackageAction { PackagePath: var package } && package.EndsWith(".msu", StringComparison.OrdinalIgnoreCase))
                     {
-                        await Run(image.RunExternalAsync(mount =>
-                            _dism.AddPackageAsync(mount, package, scratch, action.Description, progress, cancellationToken))).ConfigureAwait(false);
+                        await Run(image.AddUpdateAsync(package, scratch, action.Description, progress, cancellationToken)).ConfigureAwait(false);
                     }
                     else
                     {
@@ -310,7 +309,7 @@ public sealed class BuildRunner(
             if (recipe.Output.CleanupComponents)
             {
                 log("Cleaning up components");
-                await Run(image.RunExternalAsync(mount => _dism.CleanupComponentsAsync(mount, resetBase: false, progress, cancellationToken))).ConfigureAwait(false);
+                await Run(image.CleanupComponentsAsync(resetBase: false, progress, cancellationToken)).ConfigureAwait(false);
             }
 
             log("Saving image");
@@ -415,7 +414,7 @@ public sealed class BuildRunner(
 
         var warnings = new List<string>();
         var changed = false;
-        await using (var recovery = await MountedImage.MountAsync(workWinRE, 1, Path.Combine(work, "winre-mount"), progress, cancellationToken).ConfigureAwait(false))
+        await using (var recovery = await MountedImage.MountAsync(workWinRE, 1, Path.Combine(work, "winre-mount"), progress, _dism, cancellationToken).ConfigureAwait(false))
         {
             if (plan.SafeOS is not null && plan.Updates is { } updates)
             {
@@ -426,8 +425,7 @@ public sealed class BuildRunner(
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     log($"  {action.Description}");
-                    var result = await recovery.RunExternalAsync(mount =>
-                        _dism.AddPackageAsync(mount, action.PackagePath, scratch, $"WinRE: {action.Description}", progress, cancellationToken)).ConfigureAwait(false);
+                    var result = await recovery.AddUpdateAsync(action.PackagePath, scratch, $"WinRE: {action.Description}", progress, cancellationToken).ConfigureAwait(false);
                     if (result.ExitCode == CombinedUpdateKnownIssue)
                     {
                         // Microsoft's media update guidance calls this a known issue with combined cumulative updates, safe to ignore.
@@ -468,7 +466,7 @@ public sealed class BuildRunner(
                     && plan.Languages.Contains(defaultLanguage, StringComparer.OrdinalIgnoreCase)
                     && media.WinPE.ContainsKey(defaultLanguage))
                 {
-                    await Run(recovery.RunExternalAsync(mount => _dism.SetAllInternationalAsync(mount, defaultLanguage, progress, cancellationToken))).ConfigureAwait(false);
+                    await Run(recovery.SetAllInternationalAsync(defaultLanguage, progress, cancellationToken)).ConfigureAwait(false);
                 }
             }
 
@@ -487,7 +485,7 @@ public sealed class BuildRunner(
 
             if (cleanup)
             {
-                await Run(recovery.RunExternalAsync(mount => _dism.CleanupComponentsAsync(mount, resetBase: true, progress, cancellationToken))).ConfigureAwait(false);
+                await Run(recovery.CleanupComponentsAsync(resetBase: true, progress, cancellationToken)).ConfigureAwait(false);
             }
 
             await recovery.CommitAsync(progress, cancellationToken).ConfigureAwait(false);
