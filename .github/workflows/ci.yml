@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  build:
+    name: Build and test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+
+      # Release turns warnings into errors (Directory.Build.props).
+      - name: Build
+        run: dotnet build Familiar.slnx --configuration Release
+
+      # Tests need no elevation: nothing here mounts an image.
+      - name: Test
+        run: dotnet test --solution Familiar.slnx --configuration Release --no-build
+
+      - name: Publish self-contained CLI
+        shell: pwsh
+        run: ./eng/Publish-Cli.ps1
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: familiar-win-x64
+          path: artifacts/familiar-win-x64/familiar.exe
+          retention-days: 14
+          if-no-files-found: error
