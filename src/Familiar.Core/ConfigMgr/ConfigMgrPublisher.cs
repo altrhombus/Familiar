@@ -136,7 +136,7 @@ public sealed class ConfigMgrPublisher(IConfigMgrConnection connection)
                 var target = Path.Combine(folder, Path.GetFileName(package.SourcePath));
 
                 log($"Copying image to {target}");
-                await CopyAsync(wimPath, target, progress, cancellationToken).ConfigureAwait(false);
+                await CopyAsync(wimPath, target, overwrite: false, progress, cancellationToken).ConfigureAwait(false);
                 PublishRecord.Write(folder, new PublishRecord(package.PackageId, package.SourcePath, DateTimeOffset.Now));
 
                 log($"Pointing {package.PackageId} at {target}");
@@ -159,12 +159,18 @@ public sealed class ConfigMgrPublisher(IConfigMgrConnection connection)
                 // In place: task sequences deploy whatever the package source holds, so keep the replaced image for rollback.
                 if (File.Exists(package.SourcePath))
                 {
-                    previous = PreviousImagePath(package.SourcePath);
-                    log($"Keeping the current image as {previous}");
-                    File.Copy(package.SourcePath, previous, overwrite: true);
+                    previous = await ReplaceKeepingPreviousAsync(wimPath, package.SourcePath, progress, log, cancellationToken).ConfigureAwait(false);
+                    if (EarlierImagePaths(package.SourcePath) is { Count: > 0 } earlier)
+                    {
+                        var gigabytes = earlier.Sum(p => new FileInfo(p).Length) / (double)(1L << 30);
+                        warnings.Add(string.Create(System.Globalization.CultureInfo.InvariantCulture,
+                            $"{earlier.Count} earlier image(s) ({gigabytes:0.0} GB) are kept beside {package.SourcePath} for repeated rollbacks; delete the ones you no longer need."));
+                    }
                 }
-
-                await CopyAsync(wimPath, package.SourcePath, progress, cancellationToken).ConfigureAwait(false);
+                else
+                {
+                    await CopyAsync(wimPath, package.SourcePath, overwrite: false, progress, cancellationToken).ConfigureAwait(false);
+                }
 
                 if (request.Version is not null || request.Description is not null || request.Name is not null)
                 {
@@ -191,8 +197,17 @@ public sealed class ConfigMgrPublisher(IConfigMgrConnection connection)
                 : root;
             var target = Path.Combine(folder, Path.GetFileName(wimPath));
 
+            // Another package (or an earlier publish) may deploy this file; a new package must never replace it.
+            if (File.Exists(target))
+            {
+                throw new ConfigMgrException(
+                    $"{target} already exists, and another package may deploy it. Set configMgr.sourceFolderName (for example \"{{release}}_{{arch}}_{{n}}\") "
+                    + "so each publish gets its own folder, choose another packageSourcePath, or set packageId to update the package that uses it. "
+                    + "If it is left from an earlier publish that failed, delete it and publish again.");
+            }
+
             log($"Copying image to {target}");
-            await CopyAsync(wimPath, target, progress, cancellationToken).ConfigureAwait(false);
+            await CopyAsync(wimPath, target, overwrite: false, progress, cancellationToken).ConfigureAwait(false);
 
             var name = request.Name ?? throw new ConfigMgrException("A name is required to create a new OS image package.");
             log($"Creating OS image package \"{name}\"");
@@ -287,12 +302,34 @@ public sealed class ConfigMgrPublisher(IConfigMgrConnection connection)
             }
 
             log($"Restoring {previous} to {source}");
+            string? rejected = null;
             if (File.Exists(source))
             {
-                File.Move(source, source + ".rejected", overwrite: true);
+                rejected = source + ".rejected";
+                File.Move(source, rejected, overwrite: true);
             }
 
-            File.Move(previous, source);
+            try
+            {
+                File.Move(previous, source);
+            }
+            catch
+            {
+                // Never leave the package without a source: put the image back as it was.
+                if (rejected is not null)
+                {
+                    File.Move(rejected, source);
+                }
+
+                throw;
+            }
+
+            // The next rollback goes one image further back.
+            if (EarlierImagePaths(source) is { Count: > 0 } older)
+            {
+                File.Move(older[^1], previous);
+                log($"Kept {older[^1]} as {previous}; the next rollback restores it");
+            }
         }
 
         log($"Reloading image properties for {package.PackageId}");
@@ -326,6 +363,81 @@ public sealed class ConfigMgrPublisher(IConfigMgrConnection connection)
     /// <summary>Where the replaced image is kept: beside the source, under a name the package does not reference.</summary>
     public static string PreviousImagePath(string sourcePath) => sourcePath + ".previous";
 
+    /// <summary>
+    /// Images replaced before the one at <see cref="PreviousImagePath"/>, oldest first: <c>install.wim.previous.1</c>,
+    /// <c>.2</c> and so on, numbered in the order they were kept.
+    /// </summary>
+    internal static IReadOnlyList<string> EarlierImagePaths(string sourcePath)
+    {
+        var folder = Path.GetDirectoryName(sourcePath)!;
+        if (!Directory.Exists(folder))
+        {
+            return [];
+        }
+
+        // Windows also matches "install.wim.previous" itself against "install.wim.previous.*", so check the prefix too.
+        var prefix = Path.GetFileName(PreviousImagePath(sourcePath)) + ".";
+        return Directory.EnumerateFiles(folder, prefix + "*")
+            .Where(path => Path.GetFileName(path).Length > prefix.Length && Path.GetFileName(path).StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            .Select(path => (Path: path, Number: int.TryParse(Path.GetFileName(path).AsSpan(prefix.Length), System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var n) ? n : 0))
+            .Where(e => e.Number > 0)
+            .OrderBy(e => e.Number)
+            .Select(e => e.Path)
+            .ToList();
+    }
+
+    /// <summary>
+    /// Replaces the image at <paramref name="source"/>, keeping it as <see cref="PreviousImagePath"/> and any earlier
+    /// previous image as the next of <see cref="EarlierImagePaths"/>. The new image is copied in full beside the source
+    /// before anything is renamed, so a failed or cancelled copy leaves the source and every kept image as they were.
+    /// </summary>
+    private static async Task<string> ReplaceKeepingPreviousAsync(
+        string wimPath, string source, IProgress<ServicingProgress>? progress, Action<string> log, CancellationToken cancellationToken)
+    {
+        var staged = await CopyToPartialAsync(wimPath, source, progress, cancellationToken).ConfigureAwait(false);
+        var previous = PreviousImagePath(source);
+        string? archived = null;
+        try
+        {
+            if (File.Exists(previous))
+            {
+                var earlier = EarlierImagePaths(source);
+                var next = earlier.Count == 0 ? 1 : int.Parse(Path.GetExtension(earlier[^1]).AsSpan(1), System.Globalization.CultureInfo.InvariantCulture) + 1;
+                archived = $"{previous}.{next.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
+                File.Move(previous, archived);
+            }
+
+            log($"Keeping the current image as {previous}");
+            File.Move(source, previous);
+            try
+            {
+                File.Move(staged, source);
+            }
+            catch
+            {
+                File.Move(previous, source);
+                throw;
+            }
+        }
+        catch
+        {
+            if (archived is not null && !File.Exists(previous))
+            {
+                File.Move(archived, previous);
+            }
+
+            // If the source could not be put back, the staged copy is the only complete new image; leave it for a person.
+            if (File.Exists(source))
+            {
+                File.Delete(staged);
+            }
+
+            throw;
+        }
+
+        return previous;
+    }
+
     private async Task<IReadOnlyList<DistributionPointGroup>> ResolveGroupsAsync(IReadOnlyList<string> names, CancellationToken cancellationToken)
     {
         if (names.Count == 0)
@@ -355,8 +467,23 @@ public sealed class ConfigMgrPublisher(IConfigMgrConnection connection)
             .ToList();
     }
 
-    /// <summary>Copies to a temporary name and renames, so a failed copy never replaces a working package source.</summary>
-    private static async Task CopyAsync(string source, string destination, IProgress<ServicingProgress>? progress, CancellationToken cancellationToken)
+    /// <summary>Copies to a temporary name and renames, so a failed copy never leaves a partial image under the real name.</summary>
+    private static async Task CopyAsync(string source, string destination, bool overwrite, IProgress<ServicingProgress>? progress, CancellationToken cancellationToken)
+    {
+        var partial = await CopyToPartialAsync(source, destination, progress, cancellationToken).ConfigureAwait(false);
+        try
+        {
+            File.Move(partial, destination, overwrite);
+        }
+        catch
+        {
+            File.Delete(partial);
+            throw;
+        }
+    }
+
+    /// <summary>Copies <paramref name="source"/> beside <paramref name="destination"/> under a temporary name, which it returns.</summary>
+    private static async Task<string> CopyToPartialAsync(string source, string destination, IProgress<ServicingProgress>? progress, CancellationToken cancellationToken)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
         var partial = destination + ".familiar-partial";
@@ -364,26 +491,24 @@ public sealed class ConfigMgrPublisher(IConfigMgrConnection connection)
 
         try
         {
-            await using (var input = new FileStream(source, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 20, useAsync: true))
-            await using (var output = new FileStream(partial, FileMode.Create, FileAccess.Write, FileShare.None, 1 << 20, useAsync: true))
+            await using var input = new FileStream(source, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 20, useAsync: true);
+            await using var output = new FileStream(partial, FileMode.Create, FileAccess.Write, FileShare.None, 1 << 20, useAsync: true);
+            var buffer = new byte[4 << 20];
+            long copied = 0;
+            int read;
+            while ((read = await input.ReadAsync(buffer, cancellationToken).ConfigureAwait(false)) > 0)
             {
-                var buffer = new byte[4 << 20];
-                long copied = 0;
-                int read;
-                while ((read = await input.ReadAsync(buffer, cancellationToken).ConfigureAwait(false)) > 0)
-                {
-                    await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
-                    copied += read;
-                    progress?.Report(new ServicingProgress(operation, 100.0 * copied / input.Length));
-                }
+                await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
+                copied += read;
+                progress?.Report(new ServicingProgress(operation, 100.0 * copied / input.Length));
             }
-
-            File.Move(partial, destination, overwrite: true);
         }
         catch
         {
             File.Delete(partial);
             throw;
         }
+
+        return partial;
     }
 }

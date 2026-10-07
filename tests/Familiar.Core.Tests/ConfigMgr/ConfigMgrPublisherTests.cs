@@ -125,6 +125,131 @@ public sealed class ConfigMgrPublisherTests : IDisposable
     }
 
     [Fact]
+    public async Task InPlace_SecondPublish_KeepsTheEarlierImageToo()
+    {
+        var source = InPlaceSource([9]);
+        var site = new FakeSite { Existing = new ImagePackage("PS100123", "Win11", "1", null, source, null) };
+        var publisher = new ConfigMgrPublisher(site);
+        await publisher.PublishAsync(_wim, new ConfigMgrPublishRequest { PackageId = "PS100123" }, cancellationToken: TestContext.Current.CancellationToken);
+
+        var result = await publisher.PublishAsync(Wim("second.wim", [5]), new ConfigMgrPublishRequest { PackageId = "PS100123" }, cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Equal([5], File.ReadAllBytes(source));
+        Assert.Equal([1, 2, 3, 4], File.ReadAllBytes(source + ".previous"));
+        Assert.Equal([9], File.ReadAllBytes(source + ".previous.1"));
+        Assert.Contains(result.Warnings, w => w.Contains("1 earlier image(s)", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task InPlace_RepeatedRollbacks_WalkBackThroughEveryKeptImage()
+    {
+        var source = InPlaceSource([9]);
+        var site = new FakeSite { Existing = new ImagePackage("PS100123", "Win11", "1", null, source, null) };
+        var publisher = new ConfigMgrPublisher(site);
+        await publisher.PublishAsync(_wim, new ConfigMgrPublishRequest { PackageId = "PS100123" }, cancellationToken: TestContext.Current.CancellationToken);
+        await publisher.PublishAsync(Wim("second.wim", [5]), new ConfigMgrPublishRequest { PackageId = "PS100123" }, cancellationToken: TestContext.Current.CancellationToken);
+        await publisher.PublishAsync(Wim("third.wim", [6]), new ConfigMgrPublishRequest { PackageId = "PS100123" }, cancellationToken: TestContext.Current.CancellationToken);
+
+        await publisher.RollbackAsync("PS100123", cancellationToken: TestContext.Current.CancellationToken);
+        Assert.Equal([5], File.ReadAllBytes(source));
+
+        await publisher.RollbackAsync("PS100123", cancellationToken: TestContext.Current.CancellationToken);
+        Assert.Equal([1, 2, 3, 4], File.ReadAllBytes(source));
+
+        await publisher.RollbackAsync("PS100123", cancellationToken: TestContext.Current.CancellationToken);
+        Assert.Equal([9], File.ReadAllBytes(source));
+        Assert.Empty(ConfigMgrPublisher.EarlierImagePaths(source));
+        await Assert.ThrowsAsync<ConfigMgrException>(() => publisher.RollbackAsync("PS100123", cancellationToken: TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task InPlace_CancelledCopy_LeavesSourceAndKeptImageUntouched()
+    {
+        var source = InPlaceSource([9]);
+        File.WriteAllBytes(source + ".previous", [7]);
+        var site = new FakeSite { Existing = new ImagePackage("PS100123", "Win11", "1", null, source, null) };
+        using var cancelled = new CancellationTokenSource();
+        await cancelled.CancelAsync();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => new ConfigMgrPublisher(site).PublishAsync(_wim,
+            new ConfigMgrPublishRequest { PackageId = "PS100123" }, cancellationToken: cancelled.Token));
+
+        Assert.Equal([9], File.ReadAllBytes(source));
+        Assert.Equal([7], File.ReadAllBytes(source + ".previous"));
+        Assert.Equal([source, source + ".previous"], Directory.GetFiles(Path.GetDirectoryName(source)!).Order(StringComparer.Ordinal));
+    }
+
+    [Fact]
+    public async Task InPlace_SourceInUse_FailsWithoutChangingAnything()
+    {
+        var source = InPlaceSource([9]);
+        File.WriteAllBytes(source + ".previous", [7]);
+        var site = new FakeSite { Existing = new ImagePackage("PS100123", "Win11", "1", null, source, null) };
+
+        using (new FileStream(source, FileMode.Open, FileAccess.Read, FileShare.Read))
+        {
+            await Assert.ThrowsAsync<IOException>(() => new ConfigMgrPublisher(site).PublishAsync(_wim,
+                new ConfigMgrPublishRequest { PackageId = "PS100123" }, cancellationToken: TestContext.Current.CancellationToken));
+        }
+
+        Assert.Equal([9], File.ReadAllBytes(source));
+        Assert.Equal([7], File.ReadAllBytes(source + ".previous"));
+        Assert.Equal([source, source + ".previous"], Directory.GetFiles(Path.GetDirectoryName(source)!).Order(StringComparer.Ordinal));
+        Assert.Empty(site.Calls);
+    }
+
+    [Fact]
+    public async Task Rollback_WhenThePreviousImageCannotBeRestored_PutsTheCurrentOneBack()
+    {
+        var source = InPlaceSource([5]);
+        File.WriteAllBytes(source + ".previous", [9]);
+        var site = new FakeSite { Existing = new ImagePackage("PS100123", "Win11", "1", null, source, null) };
+
+        using (new FileStream(source + ".previous", FileMode.Open, FileAccess.Read, FileShare.Read))
+        {
+            await Assert.ThrowsAsync<IOException>(() => new ConfigMgrPublisher(site).RollbackAsync("PS100123", cancellationToken: TestContext.Current.CancellationToken));
+        }
+
+        Assert.Equal([5], File.ReadAllBytes(source));
+        Assert.Equal([9], File.ReadAllBytes(source + ".previous"));
+        Assert.False(File.Exists(source + ".rejected"));
+        Assert.Empty(site.Calls);
+    }
+
+    [Fact]
+    public async Task NewPackage_WhenTheTargetFileExists_FailsWithoutReplacingIt()
+    {
+        var source = Path.Combine(_root, "share", "Win11");
+        Directory.CreateDirectory(source);
+        var other = Path.Combine(source, "install-25h2.wim");
+        File.WriteAllBytes(other, [9]);
+        var site = new FakeSite();
+
+        var ex = await Assert.ThrowsAsync<ConfigMgrException>(() => new ConfigMgrPublisher(site).PublishAsync(_wim,
+            new ConfigMgrPublishRequest { Name = "x", PackageSourcePath = source }, cancellationToken: TestContext.Current.CancellationToken));
+
+        Assert.Contains("sourceFolderName", ex.Message, StringComparison.Ordinal);
+        Assert.Equal([9], File.ReadAllBytes(other));
+        Assert.Single(Directory.GetFiles(source));
+        Assert.Empty(site.Calls);
+    }
+
+    private string InPlaceSource(byte[] content)
+    {
+        var source = Path.Combine(_root, "share", "install.wim");
+        Directory.CreateDirectory(Path.GetDirectoryName(source)!);
+        File.WriteAllBytes(source, content);
+        return source;
+    }
+
+    private string Wim(string name, byte[] content)
+    {
+        var path = Path.Combine(_root, name);
+        File.WriteAllBytes(path, content);
+        return path;
+    }
+
+    [Fact]
     public async Task VersionedFolders_UpdateCopiesBesideAndRepointsThePackage()
     {
         var images = Path.Combine(_root, "Images", "Windows 11");
