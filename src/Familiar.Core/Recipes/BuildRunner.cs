@@ -30,6 +30,15 @@ public sealed class BuildRunner(
 {
     private readonly IImageServicer _images = images ?? new DismImageServicer();
 
+    /// <summary>Reads a package's identity from a .cab (with expand.exe).</summary>
+    internal Func<string, CancellationToken, Task<PackageIdentity?>> ReadCabIdentity { get; init; } = CabManifest.ReadIdentityAsync;
+
+    /// <summary>Defender ASR blocks against a folder since a time, from Defender's event log.</summary>
+    internal Func<DateTime, string, IReadOnlyList<Diagnostics.AsrBlock>> FindAsrBlocks { get; init; } = Diagnostics.AsrBlocks.Find;
+
+    /// <summary>The machine's mounted images, to check none is left in the working folder before deleting it.</summary>
+    internal Images.IMountTable Mounts { get; init; } = new Images.DismMountTable();
+
     public async Task<BuildResult> RunAsync(
         BuildRecipe recipe,
         IProgress<ServicingProgress>? progress = null,
@@ -80,7 +89,7 @@ public sealed class BuildRunner(
         {
             await BuildAsync(recipe, media, mediaBuild, source, work, warnings, progress, log, cancellationToken).ConfigureAwait(false);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException && Diagnostics.AsrBlocks.Find(started, work) is { Count: > 0 } blocks)
+        catch (Exception ex) when (ex is not OperationCanceledException && FindAsrBlocks(started, work) is { Count: > 0 } blocks)
         {
             // DISM reports these as generic failures (often 0x800f0922); name the real cause.
             var details = string.Join(Environment.NewLine, blocks.Take(5).Select(b =>
@@ -110,7 +119,8 @@ public sealed class BuildRunner(
         if (recipe.ConfigMgr is { } configMgr)
         {
             // Facts come from the built output, so templates and the downgrade check describe what is actually published.
-            var facts = ImageFactsReader.Read(recipe.Output.Path, catalog);
+            var facts = ImageFactsReader.FromIndex(
+                _images.GetIndex(recipe.Output.Path, 1) ?? throw new BuildException($"{recipe.Output.Path} contains no image."), catalog);
             log($"Built image: {facts.Release ?? "unknown release"} {facts.Edition} {facts.Architecture}, build {facts.Build}{(facts.Kb is null ? string.Empty : $" ({facts.Kb})")}");
             warnings.AddRange(await PublishAsync(recipe, configMgr, recipe.Output.Path, facts, connectConfigMgr, progress, log, cancellationToken).ConfigureAwait(false));
         }
@@ -360,11 +370,11 @@ public sealed class BuildRunner(
 
     private sealed record SourceDetails(string Name, string InstallationType, string Architecture, IReadOnlyList<UpdateFile>? UpdateFiles);
 
-    private static string? StillMounted(string folder)
+    private string? StillMounted(string folder)
     {
         try
         {
-            return Images.WorkingFolders.MountsInside(folder, new Images.DismMountTable()) is { Count: > 0 } left ? left[0].MountPath : null;
+            return Images.WorkingFolders.MountsInside(folder, Mounts) is { Count: > 0 } left ? left[0].MountPath : null;
         }
         catch (Exception ex) when (ex is Microsoft.Dism.DismException or System.Runtime.InteropServices.COMException)
         {
@@ -538,7 +548,7 @@ public sealed class BuildRunner(
     }
 
     /// <summary>The newest Safe OS Dynamic Update in the updates folder's SafeOS subfolder, by package version.</summary>
-    private static async Task<string?> FindSafeOSUpdateAsync(string updatesFolder, List<string> warnings, CancellationToken cancellationToken)
+    private async Task<string?> FindSafeOSUpdateAsync(string updatesFolder, List<string> warnings, CancellationToken cancellationToken)
     {
         var folder = Path.Combine(updatesFolder, UpdatesSection.SafeOSFolderName);
         if (!Directory.Exists(folder))
@@ -549,7 +559,7 @@ public sealed class BuildRunner(
         var candidates = new List<(string Path, Version? Version)>();
         foreach (var cab in Directory.EnumerateFiles(folder, "*.cab"))
         {
-            var identity = await CabManifest.ReadIdentityAsync(cab, cancellationToken).ConfigureAwait(false);
+            var identity = await ReadCabIdentity(cab, cancellationToken).ConfigureAwait(false);
             candidates.Add((cab, identity?.Version));
         }
 
@@ -564,7 +574,7 @@ public sealed class BuildRunner(
     private static long Megabytes(long bytes) => (bytes + (1 << 20) - 1) >> 20;
 
     // Any language pack on the media carries the build it was made for.
-    private static async Task<int?> ReadMediaBuildAsync(LanguageMedia media, CancellationToken cancellationToken)
+    private async Task<int?> ReadMediaBuildAsync(LanguageMedia media, CancellationToken cancellationToken)
     {
         var sample = media.LanguagePacks.Values.FirstOrDefault(p => !p.IsInterfacePack);
         if (sample is null)
@@ -572,7 +582,7 @@ public sealed class BuildRunner(
             return null;
         }
 
-        var identity = await CabManifest.ReadIdentityAsync(sample.Path, cancellationToken).ConfigureAwait(false);
+        var identity = await ReadCabIdentity(sample.Path, cancellationToken).ConfigureAwait(false);
         return identity?.Version?.Build;
     }
 
