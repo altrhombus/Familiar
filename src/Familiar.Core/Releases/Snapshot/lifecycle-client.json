@@ -1,0 +1,270 @@
+{
+  "metadata": {
+    "provider": "DataForGeeks",
+    "apiVersion": "v2",
+    "dataset": "windows-lifecycle-client",
+    "recordCount": 42,
+    "sourceUrls": [
+      "https://learn.microsoft.com/en-us/lifecycle/products/windows-10-enterprise-and-education",
+      "https://learn.microsoft.com/en-us/lifecycle/products/windows-11-enterprise-and-education",
+      "https://learn.microsoft.com/en-us/lifecycle/products/windows-10-home-and-pro",
+      "https://learn.microsoft.com/en-us/lifecycle/products/windows-11-home-and-pro"
+    ],
+    "lastModified": "2026-09-30T12:20:24Z",
+    "lastCollected": "2026-09-30T12:20:24Z"
+  },
+  "data": [
+    {
+      "version": "1507",
+      "sku": "Windows 10 Enterprise and Education",
+      "start_date": "7/29/2015 ",
+      "end_date": "5/10/2017 "
+    },
+    {
+      "version": "1507",
+      "sku": "Windows 10 Home and Pro",
+      "start_date": "7/29/2015 ",
+      "end_date": "5/10/2017 "
+    },
+    {
+      "version": "1511",
+      "sku": "Windows 10 Enterprise and Education",
+      "start_date": "11/10/2015",
+      "end_date": "10/11/2017"
+    },
+    {
+      "version": "1511",
+      "sku": "Windows 10 Home and Pro",
+      "start_date": "11/10/2015",
+      "end_date": "10/11/2017"
+    },
+    {
+      "version": "1607",
+      "sku": "Windows 10 Enterprise and Education",
+      "start_date": "8/2/2016 8",
+      "end_date": "4/10/2019 "
+    },
+    {
+      "version": "1607",
+      "sku": "Windows 10 Home and Pro",
+      "start_date": "8/2/2016 8",
+      "end_date": "4/11/2018 "
+    },
+    {
+      "version": "1703",
+      "sku": "Windows 10 Enterprise and Education",
+      "start_date": "4/11/2017 ",
+      "end_date": "10/9/2019 "
+    },
+    {
+      "version": "1703",
+      "sku": "Windows 10 Home and Pro",
+      "start_date": "4/11/2017 ",
+      "end_date": "10/10/2018"
+    },
+    {
+      "version": "1709",
+      "sku": "Windows 10 Enterprise and Education",
+      "start_date": "10/17/2017",
+      "end_date": "10/14/2020"
+    },
+    {
+      "version": "1709",
+      "sku": "Windows 10 Home and Pro",
+      "start_date": "10/17/2017",
+      "end_date": "4/10/2019 "
+    },
+    {
+      "version": "1803",
+      "sku": "Windows 10 Enterprise and Education",
+      "start_date": "4/30/2018 ",
+      "end_date": "5/12/2021 "
+    },
+    {
+      "version": "1803",
+      "sku": "Windows 10 Home and Pro",
+      "start_date": "4/30/2018 ",
+      "end_date": "11/13/2019"
+    },
+    {
+      "version": "1809",
+      "sku": "Windows 10 Enterprise and Education",
+      "start_date": "11/13/2018",
+      "end_date": "5/12/2021 "
+    },
+    {
+      "version": "1809",
+      "sku": "Windows 10 Home and Pro",
+      "start_date": "11/13/2018",
+      "end_date": "11/11/2020"
+    },
+    {
+      "version": "1903",
+      "sku": "Windows 10 Enterprise and Education",
+      "start_date": "5/21/2019 ",
+      "end_date": "12/9/2020 "
+    },
+    {
+      "version": "1903",
+      "sku": "Windows 10 Home and Pro",
+      "start_date": "5/21/2019 ",
+      "end_date": "12/9/2020 "
+    },
+    {
+      "version": "1909",
+      "sku": "Windows 10 Enterprise and Education",
+      "start_date": "11/12/2019",
+      "end_date": "5/11/2022 "
+    },
+    {
+      "version": "1909",
+      "sku": "Windows 10 Home and Pro",
+      "start_date": "11/12/2019",
+      "end_date": "5/12/2021 "
+    },
+    {
+      "version": "2004",
+      "sku": "Windows 10 Enterprise and Education",
+      "start_date": "5/27/2020 ",
+      "end_date": "12/15/2021"
+    },
+    {
+      "version": "2004",
+      "sku": "Windows 10 Home and Pro",
+      "start_date": "5/27/2020 ",
+      "end_date": "12/15/2021"
+    },
+    {
+      "version": "20H2",
+      "sku": "Windows 10 Enterprise and Education",
+      "start_date": "10/20/2020",
+      "end_date": "5/10/2023 "
+    },
+    {
+      "version": "20H2",
+      "sku": "Windows 10 Home and Pro",
+      "start_date": "10/20/2020",
+      "end_date": "5/11/2022 "
+    },
+    {
+      "version": "21H1",
+      "sku": "Windows 10 Enterprise and Education",
+      "start_date": "5/18/2021 ",
+      "end_date": "12/14/2022"
+    },
+    {
+      "version": "21H1",
+      "sku": "Windows 10 Home and Pro",
+      "start_date": "5/18/2021 ",
+      "end_date": "12/14/2022"
+    },
+    {
+      "version": "21H2",
+      "sku": "Windows 10 Enterprise and Education",
+      "start_date": "11/16/2021",
+      "end_date": "6/12/2024 "
+    },
+    {
+      "version": "21H2",
+      "sku": "Windows 11 Enterprise and Education",
+      "start_date": "10/4/2021 ",
+      "end_date": "10/9/2024 "
+    },
+    {
+      "version": "21H2",
+      "sku": "Windows 10 Home and Pro",
+      "start_date": "11/16/2021",
+      "end_date": "6/14/2023 "
+    },
+    {
+      "version": "21H2",
+      "sku": "Windows 11 Home and Pro",
+      "start_date": "10/4/2021 ",
+      "end_date": "10/11/2023"
+    },
+    {
+      "version": "22H2",
+      "sku": "Windows 10 Enterprise and Education",
+      "start_date": "10/18/2022",
+      "end_date": "10/15/2025"
+    },
+    {
+      "version": "22H2",
+      "sku": "Windows 11 Enterprise and Education",
+      "start_date": "9/20/2022 ",
+      "end_date": "10/15/2025"
+    },
+    {
+      "version": "22H2",
+      "sku": "Windows 10 Home and Pro",
+      "start_date": "10/18/2022",
+      "end_date": "10/15/2025"
+    },
+    {
+      "version": "22H2",
+      "sku": "Windows 11 Home and Pro",
+      "start_date": "9/20/2022 ",
+      "end_date": "10/9/2024 "
+    },
+    {
+      "version": "23H2",
+      "sku": "Windows 11 Enterprise and Education",
+      "start_date": "10/31/2023",
+      "end_date": "11/11/2026"
+    },
+    {
+      "version": "23H2",
+      "sku": "Windows 11 Home and Pro",
+      "start_date": "10/31/2023",
+      "end_date": "11/12/2025"
+    },
+    {
+      "version": "24H2",
+      "sku": "Windows 11 Enterprise and Education",
+      "start_date": "10/1/2024 ",
+      "end_date": "10/13/2027"
+    },
+    {
+      "version": "24H2",
+      "sku": "Windows 11 Home and Pro",
+      "start_date": "10/1/2024 ",
+      "end_date": "10/14/2026"
+    },
+    {
+      "version": "25H2",
+      "sku": "Windows 11 Enterprise and Education",
+      "start_date": "9/30/2025 ",
+      "end_date": "10/11/2028"
+    },
+    {
+      "version": "25H2",
+      "sku": "Windows 11 Home and Pro",
+      "start_date": "9/30/2025 ",
+      "end_date": "10/13/2027"
+    },
+    {
+      "version": "26H1",
+      "sku": "Windows 11 Enterprise and Education",
+      "start_date": "2/10/2026 ",
+      "end_date": "3/14/2029 "
+    },
+    {
+      "version": "26H1",
+      "sku": "Windows 11 Home and Pro",
+      "start_date": "2/10/2026 ",
+      "end_date": "3/15/2028 "
+    },
+    {
+      "version": "26H2",
+      "sku": "Windows 11 Enterprise and Education",
+      "start_date": "9/29/2026 ",
+      "end_date": "10/9/2029 "
+    },
+    {
+      "version": "26H2",
+      "sku": "Windows 11 Home and Pro",
+      "start_date": "9/29/2026 ",
+      "end_date": "10/10/2028"
+    }
+  ]
+}

@@ -1,0 +1,163 @@
+{
+  "metadata": {
+    "provider": "DataForGeeks",
+    "apiVersion": "v2",
+    "dataset": "windows-release-history",
+    "recordCount": 21,
+    "sourceUrls": [
+      "https://learn.microsoft.com/en-us/windows/release-health/release-information",
+      "https://learn.microsoft.com/en-us/windows/release-health/windows11-release-information"
+    ],
+    "lastModified": "2026-09-29T22:07:13Z",
+    "lastCollected": "2026-09-29T22:07:13Z"
+  },
+  "data": [
+    {
+      "os_type": "client",
+      "major_version": 10,
+      "windows_version": "1507 (RTM)",
+      "os_build": "10240",
+      "full_version": "10.0.10240"
+    },
+    {
+      "os_type": "client",
+      "major_version": 10,
+      "windows_version": "1511",
+      "os_build": "10586",
+      "full_version": "10.0.10586"
+    },
+    {
+      "os_type": "client",
+      "major_version": 10,
+      "windows_version": "1607",
+      "os_build": "14393",
+      "full_version": "10.0.14393"
+    },
+    {
+      "os_type": "client",
+      "major_version": 10,
+      "windows_version": "1703",
+      "os_build": "15063",
+      "full_version": "10.0.15063"
+    },
+    {
+      "os_type": "client",
+      "major_version": 10,
+      "windows_version": "1709",
+      "os_build": "16299",
+      "full_version": "10.0.16299"
+    },
+    {
+      "os_type": "client",
+      "major_version": 10,
+      "windows_version": "1803",
+      "os_build": "17134",
+      "full_version": "10.0.17134"
+    },
+    {
+      "os_type": "client",
+      "major_version": 10,
+      "windows_version": "1809",
+      "os_build": "17763",
+      "full_version": "10.0.17763"
+    },
+    {
+      "os_type": "client",
+      "major_version": 10,
+      "windows_version": "1903",
+      "os_build": "18362",
+      "full_version": "10.0.18362"
+    },
+    {
+      "os_type": "client",
+      "major_version": 10,
+      "windows_version": "1909",
+      "os_build": "18363",
+      "full_version": "10.0.18363"
+    },
+    {
+      "os_type": "client",
+      "major_version": 10,
+      "windows_version": "2004",
+      "os_build": "19041",
+      "full_version": "10.0.19041"
+    },
+    {
+      "os_type": "client",
+      "major_version": 10,
+      "windows_version": "20H2",
+      "os_build": "19042",
+      "full_version": "10.0.19042"
+    },
+    {
+      "os_type": "client",
+      "major_version": 10,
+      "windows_version": "21H1",
+      "os_build": "19043",
+      "full_version": "10.0.19043"
+    },
+    {
+      "os_type": "client",
+      "major_version": 10,
+      "windows_version": "21H2",
+      "os_build": "19044",
+      "full_version": "10.0.19044"
+    },
+    {
+      "os_type": "client",
+      "major_version": 10,
+      "windows_version": "22H2",
+      "os_build": "19045",
+      "full_version": "10.0.19045"
+    },
+    {
+      "os_type": "client",
+      "major_version": 11,
+      "windows_version": "21H2",
+      "os_build": "22000",
+      "full_version": "10.0.22000"
+    },
+    {
+      "os_type": "client",
+      "major_version": 11,
+      "windows_version": "22H2",
+      "os_build": "22621",
+      "full_version": "10.0.22621"
+    },
+    {
+      "os_type": "client",
+      "major_version": 11,
+      "windows_version": "23H2",
+      "os_build": "22631",
+      "full_version": "10.0.22631"
+    },
+    {
+      "os_type": "client",
+      "major_version": 11,
+      "windows_version": "24H2",
+      "os_build": "26100",
+      "full_version": "10.0.26100"
+    },
+    {
+      "os_type": "client",
+      "major_version": 11,
+      "windows_version": "25H2",
+      "os_build": "26200",
+      "full_version": "10.0.26200"
+    },
+    {
+      "os_type": "client",
+      "major_version": 11,
+      "windows_version": "26H2",
+      "os_build": "26300",
+      "full_version": "10.0.26300"
+    },
+    {
+      "os_type": "client",
+      "major_version": 11,
+      "windows_version": "26H1",
+      "os_build": "28000",
+      "full_version": "10.0.28000"
+    }
+  ]
+}
