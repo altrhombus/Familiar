@@ -609,6 +609,23 @@ public sealed class ConfigMgrPublisherTests : IDisposable
     }
 
     [Fact]
+    public async Task NewPackage_DistributionFailures_AreWarningsOnceThePackageExists()
+    {
+        var site = new FakeSite { FailDistribution = true };
+
+        var result = await new ConfigMgrPublisher(site).PublishAsync(_wim, new ConfigMgrPublishRequest
+        {
+            Name = "x",
+            PackageSourcePath = Path.Combine(_root, "share"),
+            DistributionPointGroups = ["All DPs"],
+            DistributionPoints = ["dp01"],
+        }, cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.True(result.Created);
+        Assert.Equal(2, result.Warnings.Count(w => w.Contains("was not distributed", StringComparison.Ordinal)));
+    }
+
+    [Fact]
     public async Task NewPackageWithoutTargets_Warns()
     {
         var result = await new ConfigMgrPublisher(new FakeSite()).PublishAsync(_wim,
@@ -622,6 +639,9 @@ public sealed class ConfigMgrPublisherTests : IDisposable
         public ImagePackage? Existing { get; set; }
 
         public bool RejectUpdates { get; init; }
+
+        /// <summary>Fail every distribution as an unreachable administration service would.</summary>
+        public bool FailDistribution { get; init; }
 
         /// <summary>Simulate a site that starts redistributing when the package changes.</summary>
         public bool RedistributesOnChange { get; init; }
@@ -691,10 +711,11 @@ public sealed class ConfigMgrPublisherTests : IDisposable
         public Task<IReadOnlyList<string>> GetPackageTargetsAsync(string packageId, CancellationToken cancellationToken = default) =>
             Task.FromResult<IReadOnlyList<string>>(Targets);
 
-        public Task DistributeToGroupAsync(string packageId, string groupId, CancellationToken cancellationToken = default) => Record($"group {packageId} {groupId}");
+        public Task DistributeToGroupAsync(string packageId, string groupId, CancellationToken cancellationToken = default) =>
+            FailDistribution ? throw new HttpRequestException("No such host is known.") : Record($"group {packageId} {groupId}");
 
         public Task DistributeToPointAsync(string packageId, DistributionPoint point, CancellationToken cancellationToken = default) =>
-            Record($"point {packageId} {point.ServerName}");
+            FailDistribution ? throw new HttpRequestException("No such host is known.") : Record($"point {packageId} {point.ServerName}");
 
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 

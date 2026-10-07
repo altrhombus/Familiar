@@ -167,10 +167,10 @@ public sealed class BuildRunner(
             var result = await new ConfigMgrPublisher(connection).PublishAsync(wimPath, request, progress, log, cancellationToken).ConfigureAwait(false);
             return result.Warnings;
         }
-        catch (Exception ex) when (ex is ConfigMgrException or IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (ConfigMgrErrors.IsSiteFailure(ex, cancellationToken))
         {
             // The image itself is built; say so, so nobody rebuilds just to retry publishing.
-            throw new BuildException($"The image was built ({wimPath}) but publishing to Configuration Manager failed: {ex.Message}"
+            throw new BuildException($"The image was built ({wimPath}) but publishing to Configuration Manager failed: {ConfigMgrErrors.Describe(ex)}"
                 + $"{Environment.NewLine}Retry with 'familiar configmgr publish <recipe>'.");
         }
     }

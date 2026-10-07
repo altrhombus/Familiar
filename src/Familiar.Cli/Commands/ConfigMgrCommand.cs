@@ -35,9 +35,9 @@ internal static class ConfigMgrCommand
                 progress.Log($"Rolled back {packageId}");
                 return ExitCodes.Success;
             }
-            catch (Exception ex) when (ex is ConfigMgrException or IOException or UnauthorizedAccessException)
+            catch (Exception ex) when (ConfigMgrErrors.IsSiteFailure(ex, cancellationToken))
             {
-                progress.Log($"error: {ex.Message}");
+                progress.Log($"error: {ConfigMgrErrors.Describe(ex)}");
                 return ExitCodes.Failure;
             }
         });
@@ -89,9 +89,9 @@ internal static class ConfigMgrCommand
 
                 return ExitCodes.Success;
             }
-            catch (ConfigMgrException ex)
+            catch (Exception ex) when (ConfigMgrErrors.IsSiteFailure(ex, cancellationToken))
             {
-                Console.Error.WriteLine($"error: {ex.Message}");
+                Console.Error.WriteLine($"error: {ConfigMgrErrors.Describe(ex)}");
                 return ExitCodes.Failure;
             }
         });

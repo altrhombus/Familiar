@@ -198,7 +198,7 @@ public sealed class WmiConnection : IConfigMgrConnection
             {
                 return action();
             }
-            catch (CimException ex)
+            catch (Exception ex) when (ex is CimException or UnauthorizedAccessException or System.Runtime.InteropServices.COMException)
             {
                 throw new ConfigMgrException($"WMI request failed: {ex.Message}", ex);
             }

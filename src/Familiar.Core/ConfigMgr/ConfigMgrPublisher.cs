@@ -268,6 +268,8 @@ public sealed class ConfigMgrPublisher(IConfigMgrConnection connection, TimeProv
 
         var targeted = created ? [] : await connection.GetPackageTargetsAsync(packageId, cancellationToken).ConfigureAwait(false);
 
+        // The package exists by now, so a failed distribution is a warning: failing here would invite a retry that
+        // publishes the image again.
         foreach (var group in groups)
         {
             log($"Distributing to group {group.Name}");
@@ -275,17 +277,26 @@ public sealed class ConfigMgrPublisher(IConfigMgrConnection connection, TimeProv
             {
                 await connection.DistributeToGroupAsync(packageId, group.GroupId, cancellationToken).ConfigureAwait(false);
             }
-            catch (ConfigMgrException ex) when (!created)
+            catch (Exception ex) when (ConfigMgrErrors.IsSiteFailure(ex, cancellationToken))
             {
-                // Usually means the package is already in the group; the refresh above covers it.
-                warnings.Add($"Group {group.Name}: {ex.Message}");
+                // For an existing package this usually means it is already in the group, which the refresh above covers.
+                warnings.Add(created
+                    ? $"{packageId} was not distributed to group {group.Name}: {ConfigMgrErrors.Describe(ex)} Distribute it from the console."
+                    : $"Group {group.Name}: {ConfigMgrErrors.Describe(ex)}");
             }
         }
 
         foreach (var point in points.Where(p => !targeted.Contains(p.NalPath, StringComparer.OrdinalIgnoreCase)))
         {
             log($"Distributing to {point.ServerName}");
-            await connection.DistributeToPointAsync(packageId, point, cancellationToken).ConfigureAwait(false);
+            try
+            {
+                await connection.DistributeToPointAsync(packageId, point, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ConfigMgrErrors.IsSiteFailure(ex, cancellationToken))
+            {
+                warnings.Add($"{packageId} was not distributed to {point.ServerName}: {ConfigMgrErrors.Describe(ex)} Distribute it from the console.");
+            }
         }
 
         if (created && groups.Count == 0 && points.Count == 0)
