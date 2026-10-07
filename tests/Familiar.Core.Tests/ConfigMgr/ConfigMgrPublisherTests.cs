@@ -125,19 +125,18 @@ public sealed class ConfigMgrPublisherTests : IDisposable
     }
 
     [Fact]
-    public async Task InPlace_SecondPublish_KeepsTheEarlierImageToo()
+    public async Task InPlace_KeepingTwo_KeepsTheEarlierImageToo()
     {
         var source = InPlaceSource([9]);
         var site = new FakeSite { Existing = new ImagePackage("PS100123", "Win11", "1", null, source, null) };
         var publisher = new ConfigMgrPublisher(site);
         await publisher.PublishAsync(_wim, new ConfigMgrPublishRequest { PackageId = "PS100123" }, cancellationToken: TestContext.Current.CancellationToken);
 
-        var result = await publisher.PublishAsync(Wim("second.wim", [5]), new ConfigMgrPublishRequest { PackageId = "PS100123" }, cancellationToken: TestContext.Current.CancellationToken);
+        await publisher.PublishAsync(Wim("second.wim", [5]), new ConfigMgrPublishRequest { PackageId = "PS100123", KeepPreviousImages = 2 }, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal([5], File.ReadAllBytes(source));
         Assert.Equal([1, 2, 3, 4], File.ReadAllBytes(source + ".previous"));
         Assert.Equal([9], File.ReadAllBytes(source + ".previous.1"));
-        Assert.Contains(result.Warnings, w => w.Contains("1 earlier image(s)", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -146,9 +145,10 @@ public sealed class ConfigMgrPublisherTests : IDisposable
         var source = InPlaceSource([9]);
         var site = new FakeSite { Existing = new ImagePackage("PS100123", "Win11", "1", null, source, null) };
         var publisher = new ConfigMgrPublisher(site);
-        await publisher.PublishAsync(_wim, new ConfigMgrPublishRequest { PackageId = "PS100123" }, cancellationToken: TestContext.Current.CancellationToken);
-        await publisher.PublishAsync(Wim("second.wim", [5]), new ConfigMgrPublishRequest { PackageId = "PS100123" }, cancellationToken: TestContext.Current.CancellationToken);
-        await publisher.PublishAsync(Wim("third.wim", [6]), new ConfigMgrPublishRequest { PackageId = "PS100123" }, cancellationToken: TestContext.Current.CancellationToken);
+        var keepThree = new ConfigMgrPublishRequest { PackageId = "PS100123", KeepPreviousImages = 3 };
+        await publisher.PublishAsync(_wim, keepThree, cancellationToken: TestContext.Current.CancellationToken);
+        await publisher.PublishAsync(Wim("second.wim", [5]), keepThree, cancellationToken: TestContext.Current.CancellationToken);
+        await publisher.PublishAsync(Wim("third.wim", [6]), keepThree, cancellationToken: TestContext.Current.CancellationToken);
 
         await publisher.RollbackAsync("PS100123", cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal([5], File.ReadAllBytes(source));
@@ -232,6 +232,166 @@ public sealed class ConfigMgrPublisherTests : IDisposable
         Assert.Equal([9], File.ReadAllBytes(other));
         Assert.Single(Directory.GetFiles(source));
         Assert.Empty(site.Calls);
+    }
+
+    [Fact]
+    public async Task InPlace_ByDefault_KeepsOnlyTheImageBeforeTheCurrentOne()
+    {
+        var source = InPlaceSource([9]);
+        var site = new FakeSite { Existing = new ImagePackage("PS100123", "Win11", "1", null, source, null) };
+        var publisher = new ConfigMgrPublisher(site);
+        await publisher.PublishAsync(_wim, new ConfigMgrPublishRequest { PackageId = "PS100123" }, cancellationToken: TestContext.Current.CancellationToken);
+        await publisher.PublishAsync(Wim("second.wim", [5]), new ConfigMgrPublishRequest { PackageId = "PS100123" }, cancellationToken: TestContext.Current.CancellationToken);
+
+        var result = await publisher.PublishAsync(Wim("third.wim", [6]), new ConfigMgrPublishRequest { PackageId = "PS100123" }, cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Equal(source + ".previous", result.PreviousImagePath);
+        Assert.Equal([source, source + ".previous"], Directory.GetFiles(Path.GetDirectoryName(source)!).Order(StringComparer.Ordinal));
+        Assert.Equal([5], File.ReadAllBytes(source + ".previous"));
+        Assert.Empty(result.Warnings);
+
+        await publisher.RollbackAsync("PS100123", cancellationToken: TestContext.Current.CancellationToken);
+        Assert.Equal([5], File.ReadAllBytes(source));
+        await Assert.ThrowsAsync<ConfigMgrException>(() => publisher.RollbackAsync("PS100123", cancellationToken: TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task InPlace_KeepingNone_LeavesNothingToRollBackTo()
+    {
+        var source = InPlaceSource([9]);
+        var site = new FakeSite { Existing = new ImagePackage("PS100123", "Win11", "1", null, source, null) };
+
+        var result = await new ConfigMgrPublisher(site).PublishAsync(_wim,
+            new ConfigMgrPublishRequest { PackageId = "PS100123", KeepPreviousImages = 0 }, cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Null(result.PreviousImagePath);
+        Assert.Equal([source], Directory.GetFiles(Path.GetDirectoryName(source)!));
+        Assert.Equal([1, 2, 3, 4], File.ReadAllBytes(source));
+    }
+
+    [Fact]
+    public async Task VersionedFolders_ByDefault_RemoveOlderFoldersFamiliarPublished()
+    {
+        var images = Path.Combine(_root, "Images");
+        var site = new FakeSite { Existing = new ImagePackage("PS1000A1", "x", "1", null, VersionedSource(images, "manual"), null) };
+        var publisher = new ConfigMgrPublisher(site, new SteppingClock());
+
+        await publisher.PublishAsync(_wim, Versioned(), cancellationToken: TestContext.Current.CancellationToken);
+        await publisher.PublishAsync(_wim, Versioned(), cancellationToken: TestContext.Current.CancellationToken);
+        await publisher.PublishAsync(_wim, Versioned(), cancellationToken: TestContext.Current.CancellationToken);
+
+        // b.3 is current and b.2 the one before; b.1 goes. The folder Familiar did not create is never touched.
+        Assert.Equal(["b.2", "b.3", "manual"], FolderNames(images));
+        Assert.Equal(Path.Combine(images, "b.3", "install.wim"), site.Existing!.SourcePath);
+    }
+
+    [Fact]
+    public async Task VersionedFolders_KeepAFolderAnotherPackageUses()
+    {
+        var images = Path.Combine(_root, "Images");
+        var site = new FakeSite { Existing = new ImagePackage("PS1000A1", "x", "1", null, VersionedSource(images, "manual"), null) };
+        var publisher = new ConfigMgrPublisher(site, new SteppingClock());
+        await publisher.PublishAsync(_wim, Versioned(), cancellationToken: TestContext.Current.CancellationToken);
+        site.Others.Add(new ImagePackage("PS1000B2", "UAT", "1", null, Path.Combine(images, "b.1", "install.wim"), null));
+
+        await publisher.PublishAsync(_wim, Versioned(), cancellationToken: TestContext.Current.CancellationToken);
+        await publisher.PublishAsync(_wim, Versioned(), cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Equal(["b.1", "b.2", "b.3", "manual"], FolderNames(images));
+    }
+
+    [Fact]
+    public async Task VersionedFolders_AfterARollback_KeepTheFolderRolledBackTo()
+    {
+        var images = Path.Combine(_root, "Images");
+        var site = new FakeSite { Existing = new ImagePackage("PS1000A1", "x", "1", null, VersionedSource(images, "manual"), null) };
+        var publisher = new ConfigMgrPublisher(site, new SteppingClock());
+        await publisher.PublishAsync(_wim, Versioned(), cancellationToken: TestContext.Current.CancellationToken);
+        await publisher.PublishAsync(_wim, Versioned(), cancellationToken: TestContext.Current.CancellationToken);
+        await publisher.RollbackAsync("PS1000A1", cancellationToken: TestContext.Current.CancellationToken);
+        Assert.Equal(Path.Combine(images, "b.1", "install.wim"), site.Existing!.SourcePath);
+
+        await publisher.PublishAsync(_wim, Versioned(), cancellationToken: TestContext.Current.CancellationToken);
+
+        // b.2 was rejected by the rollback, so b.1 (the image that was in use) is the one kept.
+        Assert.Equal(["b.1", "b.3", "manual"], FolderNames(images));
+    }
+
+    [Fact]
+    public async Task Rollback_UndoesAnInPlacePublishBeforeTheVersionedOneUnderIt()
+    {
+        var images = Path.Combine(_root, "Images");
+        var original = VersionedSource(images, "manual");
+        var site = new FakeSite { Existing = new ImagePackage("PS1000A1", "x", "1", null, original, null) };
+        var publisher = new ConfigMgrPublisher(site, new SteppingClock());
+        await publisher.PublishAsync(_wim, Versioned(), cancellationToken: TestContext.Current.CancellationToken);
+        var versioned = site.Existing!.SourcePath!;
+        await publisher.PublishAsync(Wim("second.wim", [5]), new ConfigMgrPublishRequest { PackageId = "PS1000A1" }, cancellationToken: TestContext.Current.CancellationToken);
+
+        await publisher.RollbackAsync("PS1000A1", cancellationToken: TestContext.Current.CancellationToken);
+        Assert.Equal(versioned, site.Existing!.SourcePath);
+        Assert.Equal([1, 2, 3, 4], File.ReadAllBytes(versioned));
+
+        await publisher.RollbackAsync("PS1000A1", cancellationToken: TestContext.Current.CancellationToken);
+        Assert.Equal(original, site.Existing!.SourcePath);
+    }
+
+    [Fact]
+    public async Task NewPackage_Force_ReplacesAFileNoPackageUses()
+    {
+        var source = Path.Combine(_root, "share", "Win11");
+        Directory.CreateDirectory(source);
+        var leftover = Path.Combine(source, "install-25h2.wim");
+        File.WriteAllBytes(leftover, [9]);
+        var site = new FakeSite();
+
+        var result = await new ConfigMgrPublisher(site).PublishAsync(_wim,
+            new ConfigMgrPublishRequest { Name = "x", PackageSourcePath = source, OverwriteExistingSource = true }, cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.True(result.Created);
+        Assert.Equal([1, 2, 3, 4], File.ReadAllBytes(leftover));
+        Assert.Single(Directory.GetFiles(source));
+    }
+
+    [Fact]
+    public async Task NewPackage_Force_StillRefusesAFileAnImagePackageUses()
+    {
+        var source = Path.Combine(_root, "share", "Win11");
+        Directory.CreateDirectory(source);
+        var used = Path.Combine(source, "install-25h2.wim");
+        File.WriteAllBytes(used, [9]);
+        var site = new FakeSite();
+        site.Others.Add(new ImagePackage("PS1000B2", "Production", "1", null, used, null));
+
+        var ex = await Assert.ThrowsAsync<ConfigMgrException>(() => new ConfigMgrPublisher(site).PublishAsync(_wim,
+            new ConfigMgrPublishRequest { Name = "x", PackageSourcePath = source, OverwriteExistingSource = true }, cancellationToken: TestContext.Current.CancellationToken));
+
+        Assert.Contains("PS1000B2", ex.Message, StringComparison.Ordinal);
+        Assert.Equal([9], File.ReadAllBytes(used));
+        Assert.DoesNotContain(site.Calls, c => c.StartsWith("create", StringComparison.Ordinal));
+    }
+
+    private static ConfigMgrPublishRequest Versioned() => new() { PackageId = "PS1000A1", SourceFolderName = "b.{n}" };
+
+    private static string VersionedSource(string images, string folder)
+    {
+        var path = Path.Combine(images, folder, "install.wim");
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllBytes(path, [9]);
+        return path;
+    }
+
+    private static string[] FolderNames(string folder) =>
+        [.. Directory.GetDirectories(folder).Select(d => Path.GetFileName(d)).Order(StringComparer.Ordinal)];
+
+    /// <summary>A clock that moves on a minute every time it is read, so publish records never share a time.</summary>
+    private sealed class SteppingClock : TimeProvider
+    {
+        private DateTimeOffset _now = new(2026, 10, 6, 9, 0, 0, TimeSpan.Zero);
+
+        public override TimeZoneInfo LocalTimeZone => TimeZoneInfo.Utc;
+
+        public override DateTimeOffset GetUtcNow() => _now = _now.AddMinutes(1);
     }
 
     private string InPlaceSource(byte[] content)
@@ -473,12 +633,15 @@ public sealed class ConfigMgrPublisherTests : IDisposable
 
         public List<string> Targets { get; } = [];
 
+        /// <summary>Other OS image packages on the site.</summary>
+        public List<ImagePackage> Others { get; } = [];
+
         public ConfigMgrTransport Transport => ConfigMgrTransport.Wmi;
 
         public string SiteCode => "PS1";
 
         public Task<IReadOnlyList<ImagePackage>> GetImagePackagesAsync(CancellationToken cancellationToken = default) =>
-            Task.FromResult<IReadOnlyList<ImagePackage>>(Existing is null ? [] : [Existing]);
+            Task.FromResult<IReadOnlyList<ImagePackage>>(Existing is null ? [.. Others] : [Existing, .. Others]);
 
         public Task<ImagePackage?> GetImagePackageAsync(string packageId, CancellationToken cancellationToken = default) =>
             Task.FromResult(Existing?.PackageId == packageId ? Existing : null);

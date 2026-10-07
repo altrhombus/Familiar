@@ -97,6 +97,11 @@ public static class RecipeValidator
                 }
             }
 
+            if (configMgr.KeepPreviousImages < 0)
+            {
+                errors.Add($"configMgr.keepPreviousImages must be 0 or more, not {configMgr.KeepPreviousImages}.");
+            }
+
             // The site server reads the package source, so it must be a share, not a path on this machine.
             if (configMgr.PackageSourcePath is { } source && !source.StartsWith(@"\\", StringComparison.Ordinal))
             {

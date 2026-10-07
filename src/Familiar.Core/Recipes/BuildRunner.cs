@@ -119,7 +119,8 @@ public sealed class BuildRunner(
         Func<ConfigMgrSection, Action<string>, CancellationToken, Task<IConfigMgrConnection>>? connect,
         IProgress<ServicingProgress>? progress,
         Action<string> log,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool overwriteExistingSource = false)
     {
         ArgumentNullException.ThrowIfNull(recipe);
         ArgumentNullException.ThrowIfNull(section);
@@ -145,6 +146,8 @@ public sealed class BuildRunner(
                 SourceFolderName = section.SourceFolderName,
                 Image = facts,
                 AllowOlderImage = section.AllowOlderImage,
+                KeepPreviousImages = section.KeepPreviousImages,
+                OverwriteExistingSource = overwriteExistingSource,
             };
 
             if (request.Name is not null || request.Version is not null || request.Description is not null)

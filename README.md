@@ -38,11 +38,14 @@ longer maintained.
   handles reads, creates and method calls; property updates (such as repointing a package) go over WMI,
   because the AdminService cannot update properties (tested on 2603). WMI is also the fallback when the
   AdminService is unreachable. Neither needs the ConfigMgr console or PowerShell module on the build machine. Updating an existing package changes what its task sequences
-  deploy, so point recipes at a test package first: the replaced WIM is kept as `.previous` (and earlier ones as
-  `.previous.1`, `.previous.2`, ...) for `familiar configmgr rollback`, which steps back one image each time, and
-  `refreshDistributionPoints: false` holds the new image back from DPs.
+  deploy, so point recipes at a test package first: the replaced WIM is kept as `.previous` for
+  `familiar configmgr rollback`, and `refreshDistributionPoints: false` holds the new image back from DPs.
   Sites that keep a folder per build can set `sourceFolderName` (e.g. `{release}_{arch}_{date:yyMM}_{n}`):
   each publish gets a new folder, the package is repointed, and rollback points it back.
+  `keepPreviousImages` (default 1) sets how many replaced images or folders are kept; older ones are deleted
+  after a successful publish, except folders another OS image package still uses. Each rollback steps back one.
+  A new package never replaces a file already at its source path unless `configmgr publish --force` is given,
+  and not even then if an OS image package uses it.
 - **Inbox apps follow the languages.** Apps already in the image are re-provisioned from the Inbox Apps ISO so
   their bundles add resources for newly added languages. Dependencies come from each app's own manifest.
 - **Updates downloaded for you.** The latest cumulative update comes from the release data; Familiar finds it

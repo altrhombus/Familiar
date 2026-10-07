@@ -51,7 +51,7 @@ public sealed record ConfigMgrSection
     /// <summary>
     /// Existing OS image package to update. Omit to create a new one. Task sequences using this package deploy
     /// whatever its source holds, so point recipes at a test package first; the replaced WIM is kept as
-    /// <c>.previous</c> for <c>familiar configmgr rollback</c>.
+    /// <c>.previous</c> for <c>familiar configmgr rollback</c> (see <see cref="KeepPreviousImages"/>).
     /// </summary>
     public string? PackageId { get; init; }
 
@@ -88,6 +88,14 @@ public sealed record ConfigMgrSection
     /// so a skipped update or older media cannot roll deployments back.
     /// </summary>
     public bool AllowOlderImage { get; set; }
+
+    /// <summary>
+    /// How many replaced images to keep for rollback (default 1, the image before the current one). In place these
+    /// are <c>.previous</c> and <c>.previous.N</c>; with sourceFolderName, earlier folders Familiar published for the
+    /// package. Older ones are deleted after each successful publish, except folders an OS image package still uses.
+    /// 0 keeps none, so nothing can be rolled back.
+    /// </summary>
+    public int KeepPreviousImages { get; set; } = 1;
 
     public IReadOnlyList<string> DistributionPointGroups { get; set; } = [];
 

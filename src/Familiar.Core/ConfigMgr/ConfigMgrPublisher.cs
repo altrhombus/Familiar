@@ -46,6 +46,19 @@ public sealed record ConfigMgrPublishRequest
     /// default: a skipped or failed update, or older media, would otherwise roll deployments back.
     /// </summary>
     public bool AllowOlderImage { get; init; }
+
+    /// <summary>
+    /// How many replaced images to keep for rollback: in place, <c>.previous</c> and the numbered ones before it;
+    /// with versioned folders, earlier folders Familiar published for this package. Older ones are deleted after a
+    /// successful publish, except folders an OS image package still uses. 0 keeps none, so nothing can be rolled back.
+    /// </summary>
+    public int KeepPreviousImages { get; init; } = 1;
+
+    /// <summary>
+    /// For a new package, replace a file already at the target path instead of refusing. Still refused when an OS
+    /// image package uses that file; other package types are not checked.
+    /// </summary>
+    public bool OverwriteExistingSource { get; init; }
 }
 
 /// <summary>Written into each versioned folder so rollback knows which source it replaced.</summary>
@@ -82,8 +95,11 @@ public sealed record ConfigMgrPublishResult(string PackageId, bool Created, stri
 /// package, reload its image properties, then distribute (new packages) or refresh distribution points
 /// (existing packages).
 /// </summary>
-public sealed class ConfigMgrPublisher(IConfigMgrConnection connection)
+/// <param name="time">Clock for folder names and publish records; the system clock unless a test sets one.</param>
+public sealed class ConfigMgrPublisher(IConfigMgrConnection connection, TimeProvider? time = null)
 {
+    private readonly TimeProvider _time = time ?? TimeProvider.System;
+
     public async Task<ConfigMgrPublishResult> PublishAsync(
         string wimPath,
         ConfigMgrPublishRequest request,
@@ -132,12 +148,12 @@ public sealed class ConfigMgrPublisher(IConfigMgrConnection connection)
             {
                 // Versioned folders: copy beside the current one, then repoint the package. The old folder is the rollback.
                 var parent = request.PackageSourcePath ?? Path.GetDirectoryName(Path.GetDirectoryName(package.SourcePath))!;
-                var folder = SourceFolderTemplate.Expand(template, parent, request.Image, DateTime.Now);
+                var folder = SourceFolderTemplate.Expand(template, parent, request.Image, _time.GetLocalNow().DateTime);
                 var target = Path.Combine(folder, Path.GetFileName(package.SourcePath));
 
                 log($"Copying image to {target}");
                 await CopyAsync(wimPath, target, overwrite: false, progress, cancellationToken).ConfigureAwait(false);
-                PublishRecord.Write(folder, new PublishRecord(package.PackageId, package.SourcePath, DateTimeOffset.Now));
+                PublishRecord.Write(folder, new PublishRecord(package.PackageId, package.SourcePath, _time.GetLocalNow()));
 
                 log($"Pointing {package.PackageId} at {target}");
                 try
@@ -153,6 +169,7 @@ public sealed class ConfigMgrPublisher(IConfigMgrConnection connection)
                 await VerifySourceAsync(package.PackageId, target, cancellationToken).ConfigureAwait(false);
 
                 previous = package.SourcePath;
+                await TrimPublishedFoldersAsync(package.PackageId, parent, folder, Path.GetDirectoryName(previous)!, request.KeepPreviousImages, log, warnings, cancellationToken).ConfigureAwait(false);
             }
             else
             {
@@ -160,11 +177,9 @@ public sealed class ConfigMgrPublisher(IConfigMgrConnection connection)
                 if (File.Exists(package.SourcePath))
                 {
                     previous = await ReplaceKeepingPreviousAsync(wimPath, package.SourcePath, progress, log, cancellationToken).ConfigureAwait(false);
-                    if (EarlierImagePaths(package.SourcePath) is { Count: > 0 } earlier)
+                    if (TrimKeptImages(package.SourcePath, request.KeepPreviousImages, log, warnings) == 0)
                     {
-                        var gigabytes = earlier.Sum(p => new FileInfo(p).Length) / (double)(1L << 30);
-                        warnings.Add(string.Create(System.Globalization.CultureInfo.InvariantCulture,
-                            $"{earlier.Count} earlier image(s) ({gigabytes:0.0} GB) are kept beside {package.SourcePath} for repeated rollbacks; delete the ones you no longer need."));
+                        previous = null;
                     }
                 }
                 else
@@ -193,21 +208,35 @@ public sealed class ConfigMgrPublisher(IConfigMgrConnection connection)
             var root = request.PackageSourcePath
                 ?? throw new ConfigMgrException("configMgr.packageSourcePath is required to create a new OS image package.");
             var folder = request.SourceFolderName is { } template
-                ? SourceFolderTemplate.Expand(template, root, request.Image, DateTime.Now)
+                ? SourceFolderTemplate.Expand(template, root, request.Image, _time.GetLocalNow().DateTime)
                 : root;
             var target = Path.Combine(folder, Path.GetFileName(wimPath));
 
-            // Another package (or an earlier publish) may deploy this file; a new package must never replace it.
-            if (File.Exists(target))
+            // Another package (or an earlier publish) may deploy this file; a new package must not replace it unasked.
+            var replacing = File.Exists(target);
+            if (replacing && !request.OverwriteExistingSource)
             {
                 throw new ConfigMgrException(
                     $"{target} already exists, and another package may deploy it. Set configMgr.sourceFolderName (for example \"{{release}}_{{arch}}_{{n}}\") "
                     + "so each publish gets its own folder, choose another packageSourcePath, or set packageId to update the package that uses it. "
-                    + "If it is left from an earlier publish that failed, delete it and publish again.");
+                    + "If it is left from an earlier publish that failed, publish again with --force to replace it.");
+            }
+
+            if (replacing)
+            {
+                var user = (await connection.GetImagePackagesAsync(cancellationToken).ConfigureAwait(false))
+                    .FirstOrDefault(p => p.SourcePath is { } s && SamePath(s, target));
+                if (user is not null)
+                {
+                    throw new ConfigMgrException(
+                        $"{target} is the source of OS image package {user.PackageId} ({user.Name}), so it was not replaced. Set packageId to {user.PackageId} to update that package.");
+                }
+
+                log($"Replacing {target}, which no OS image package uses (--force)");
             }
 
             log($"Copying image to {target}");
-            await CopyAsync(wimPath, target, overwrite: false, progress, cancellationToken).ConfigureAwait(false);
+            await CopyAsync(wimPath, target, overwrite: replacing, progress, cancellationToken).ConfigureAwait(false);
 
             var name = request.Name ?? throw new ConfigMgrException("A name is required to create a new OS image package.");
             log($"Creating OS image package \"{name}\"");
@@ -281,26 +310,11 @@ public sealed class ConfigMgrPublisher(IConfigMgrConnection connection)
             ?? throw new ConfigMgrException($"OS image package {packageId} was not found on site {connection.SiteCode}.");
         var source = package.SourcePath ?? throw new ConfigMgrException($"OS image package {packageId} has no source path.");
 
-        if (PublishRecord.Read(Path.GetDirectoryName(source)!) is { PackageId: var recorded, PreviousSourcePath: var earlier }
-            && string.Equals(recorded, package.PackageId, StringComparison.OrdinalIgnoreCase))
+        // An image kept beside the source is always the most recent replacement: a package published into versioned
+        // folders and later in place has both, and the in-place one came last.
+        var previous = PreviousImagePath(source);
+        if (File.Exists(previous))
         {
-            if (!File.Exists(earlier))
-            {
-                throw new ConfigMgrException($"The image this update replaced is gone ({earlier} does not exist).");
-            }
-
-            log($"Pointing {package.PackageId} back at {earlier}");
-            await connection.UpdateImagePackageAsync(package.PackageId, version: null, description: null, earlier, cancellationToken: cancellationToken).ConfigureAwait(false);
-            await VerifySourceAsync(package.PackageId, earlier, cancellationToken).ConfigureAwait(false);
-        }
-        else
-        {
-            var previous = PreviousImagePath(source);
-            if (!File.Exists(previous))
-            {
-                throw new ConfigMgrException($"No previous image to roll back to: {source} was not published by Familiar into a versioned folder, and {previous} does not exist.");
-            }
-
             log($"Restoring {previous} to {source}");
             string? rejected = null;
             if (File.Exists(source))
@@ -330,6 +344,22 @@ public sealed class ConfigMgrPublisher(IConfigMgrConnection connection)
                 File.Move(older[^1], previous);
                 log($"Kept {older[^1]} as {previous}; the next rollback restores it");
             }
+        }
+        else if (PublishRecord.Read(Path.GetDirectoryName(source)!) is { PackageId: var recorded, PreviousSourcePath: var earlier }
+            && string.Equals(recorded, package.PackageId, StringComparison.OrdinalIgnoreCase))
+        {
+            if (!File.Exists(earlier))
+            {
+                throw new ConfigMgrException($"The image this update replaced is gone ({earlier} does not exist).");
+            }
+
+            log($"Pointing {package.PackageId} back at {earlier}");
+            await connection.UpdateImagePackageAsync(package.PackageId, version: null, description: null, earlier, cancellationToken: cancellationToken).ConfigureAwait(false);
+            await VerifySourceAsync(package.PackageId, earlier, cancellationToken).ConfigureAwait(false);
+        }
+        else
+        {
+            throw new ConfigMgrException($"No previous image to roll back to: {previous} does not exist, and {source} was not published by Familiar into a versioned folder.");
         }
 
         log($"Reloading image properties for {package.PackageId}");
@@ -385,6 +415,81 @@ public sealed class ConfigMgrPublisher(IConfigMgrConnection connection)
             .Select(e => e.Path)
             .ToList();
     }
+
+    /// <summary>
+    /// Deletes kept images beyond the newest <paramref name="keep"/> (<c>.previous</c> first, then the numbered ones,
+    /// newest first) and returns how many are left.
+    /// </summary>
+    private static int TrimKeptImages(string source, int keep, Action<string> log, List<string> warnings)
+    {
+        var kept = new[] { PreviousImagePath(source) }.Concat(EarlierImagePaths(source).Reverse()).Where(File.Exists).ToList();
+        var left = kept.Count;
+        foreach (var path in kept.Skip(keep))
+        {
+            try
+            {
+                File.Delete(path);
+                left--;
+                log($"Removed {path} (configMgr.keepPreviousImages is {keep.ToString(System.Globalization.CultureInfo.InvariantCulture)})");
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                warnings.Add($"Could not remove the older kept image {path}: {ex.Message}");
+            }
+        }
+
+        return left;
+    }
+
+    /// <summary>
+    /// Deletes folders Familiar published for <paramref name="packageId"/> under <paramref name="parent"/> beyond the
+    /// newest <paramref name="keep"/>. The folder the package used until now counts first, so after a rollback the
+    /// image that was rolled back to is kept rather than the rejected one. Folders without Familiar's publish record,
+    /// and folders any OS image package still uses, are never deleted.
+    /// </summary>
+    private async Task TrimPublishedFoldersAsync(
+        string packageId, string parent, string current, string replaced, int keep, Action<string> log, List<string> warnings, CancellationToken cancellationToken)
+    {
+        var surplus = Directory.EnumerateDirectories(parent)
+            .Where(folder => !SamePath(folder, current))
+            .Select(folder => (Folder: folder, Record: PublishRecord.Read(folder)))
+            .Where(e => e.Record is { } record && string.Equals(record.PackageId, packageId, StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(e => SamePath(e.Folder, replaced))
+            .ThenByDescending(e => e.Record!.PublishedAt)
+            .Skip(keep)
+            .Select(e => e.Folder)
+            .ToList();
+        if (surplus.Count == 0)
+        {
+            return;
+        }
+
+        var packages = await connection.GetImagePackagesAsync(cancellationToken).ConfigureAwait(false);
+        foreach (var folder in surplus)
+        {
+            if (packages.FirstOrDefault(p => p.SourcePath is { } s && IsInside(s, folder)) is { } user)
+            {
+                log($"Keeping {folder}: OS image package {user.PackageId} ({user.Name}) uses it");
+                continue;
+            }
+
+            try
+            {
+                Directory.Delete(folder, recursive: true);
+                log($"Removed {folder} (configMgr.keepPreviousImages is {keep.ToString(System.Globalization.CultureInfo.InvariantCulture)})");
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                warnings.Add($"Could not remove the older published folder {folder}: {ex.Message}");
+            }
+        }
+    }
+
+    private static bool SamePath(string a, string b) =>
+        string.Equals(Path.TrimEndingDirectorySeparator(Path.GetFullPath(a)), Path.TrimEndingDirectorySeparator(Path.GetFullPath(b)), StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsInside(string path, string folder) =>
+        Path.GetFullPath(path).StartsWith(Path.TrimEndingDirectorySeparator(Path.GetFullPath(folder)) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Replaces the image at <paramref name="source"/>, keeping it as <see cref="PreviousImagePath"/> and any earlier

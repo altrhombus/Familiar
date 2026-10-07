@@ -92,6 +92,12 @@ internal static class RecipeCommand
             {
                 var target = configMgr.PackageId is { } id ? $"update {id}" : $"new package in {configMgr.PackageSourcePath}";
                 Console.WriteLine($"Publish: {configMgr.SiteServer} ({configMgr.Transport}), {target}");
+                if (configMgr.PackageId is not null)
+                {
+                    Console.WriteLine(configMgr.KeepPreviousImages == 0
+                        ? "         keeps no replaced image, so rollback is not possible"
+                        : $"         keeps the last {configMgr.KeepPreviousImages} replaced image(s) for rollback");
+                }
             }
 
             if (recipe.Updates is { } updates && Directory.Exists(updates.Folder))

@@ -16,7 +16,7 @@ internal static class ConfigMgrCommand
     private static Command CreateRollback()
     {
         var recipePath = new Argument<FileInfo>("recipe") { Description = "Recipe whose configMgr.packageId to roll back." };
-        var command = new Command("rollback", "Restore the image an update replaced (kept as .previous) and refresh distribution points.") { recipePath };
+        var command = new Command("rollback", "Restore the image the last update replaced and refresh distribution points; run again to go further back.") { recipePath };
 
         command.SetAction(async (parseResult, cancellationToken) =>
         {
@@ -103,11 +103,16 @@ internal static class ConfigMgrCommand
     {
         var recipePath = new Argument<FileInfo>("recipe") { Description = "Recipe whose output and configMgr section to use." };
         var wim = new Option<FileInfo?>("--wim") { Description = "Publish this WIM instead of the recipe's output.path." };
+        var force = new Option<bool>("--force")
+        {
+            Description = "Creating a package: replace a file already at the target path, unless an OS image package uses it.",
+        };
 
         var command = new Command("publish", "Publish an already-built image to Configuration Manager.")
         {
             recipePath,
             wim,
+            force,
             CatalogOptions.Offline,
             CatalogOptions.Refresh,
         };
@@ -168,7 +173,7 @@ internal static class ConfigMgrCommand
 
             try
             {
-                var warnings = await BuildRunner.PublishAsync(recipe, section, path, facts, connect: null, progress, progress.Log, cancellationToken);
+                var warnings = await BuildRunner.PublishAsync(recipe, section, path, facts, connect: null, progress, progress.Log, cancellationToken, parseResult.GetValue(force));
                 foreach (var warning in warnings)
                 {
                     progress.Log($"warning: {warning}");

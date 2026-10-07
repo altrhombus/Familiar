@@ -210,6 +210,29 @@ public class RecipeTests
     }
 
     [Fact]
+    public void Parse_ConfigMgrSection_KeepsOnePreviousImageUnlessSet()
+    {
+        var json = Minimal.Replace("\"output\":", """
+            "configMgr": { "siteServer": "cm01.contoso.com", "packageId": "PS100123" },
+            "output":
+            """, StringComparison.Ordinal);
+
+        Assert.Equal(1, RecipeSerializer.Parse(json, @"C:\Recipes").ConfigMgr!.KeepPreviousImages);
+        Assert.Equal(3, RecipeSerializer.Parse(json.Replace("\"packageId\"", "\"keepPreviousImages\": 3, \"packageId\"", StringComparison.Ordinal), @"C:\Recipes").ConfigMgr!.KeepPreviousImages);
+    }
+
+    [Fact]
+    public void Validate_ConfigMgrSection_RejectsNegativeKeepPreviousImages()
+    {
+        var recipe = RecipeSerializer.Template() with
+        {
+            ConfigMgr = new ConfigMgrSection { SiteServer = "cm01.contoso.com", PackageId = "PS100123", KeepPreviousImages = -1 },
+        };
+
+        Assert.Contains(RecipeValidator.Validate(recipe, checkFiles: false), e => e.Contains("keepPreviousImages", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void Validate_RejectsFutureSchema()
     {
         var recipe = RecipeSerializer.Template() with { SchemaVersion = 2 };
